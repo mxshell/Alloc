@@ -226,6 +226,20 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
                                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                             )}
                         </div>
+                        <div className="flex items-center justify-center gap-2 text-sm">
+                            <span className="text-slate-500">
+                                Data export instructions can be found at{" "}
+                                <a
+                                    href="https://github.com/mxshell/Alloc?tab=readme-ov-file#exporting-portfolio-data"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-500 hover:text-blue-400 underline"
+                                >
+                                    here
+                                </a>
+                                .
+                            </span>
+                        </div>
 
                         <div className="flex items-center justify-center gap-2">
                             <p className="text-blue-500 mt-2">
