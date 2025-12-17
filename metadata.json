@@ -1,0 +1,5 @@
+{
+  "name": "Alloc Dashboard",
+  "description": "A personal stock portfolio visualizer featuring account summaries, interactive treemaps, and detailed position analytics.",
+  "requestFramePermissions": []
+}
