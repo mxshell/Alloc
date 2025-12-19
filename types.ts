@@ -62,3 +62,18 @@ export interface SortConfig {
   key: keyof PositionData;
   direction: 'asc' | 'desc';
 }
+
+// Categorical Analysis types
+export interface CategoricalGroup {
+  id: string;
+  name: string;
+  tickers: string[];
+  subGroups: Record<string, string>; // Maps ticker to sub-group name
+}
+
+export interface SubGroupData {
+  name: string;
+  value: number;
+  percentage: number;
+  tickers: string[];
+}

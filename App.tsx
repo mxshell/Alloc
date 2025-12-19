@@ -4,6 +4,7 @@ import { AccountData, PositionData } from "./types";
 import SummaryCard from "./components/SummaryCard";
 import PositionsTable from "./components/PositionsTable";
 import PortfolioChart from "./components/PortfolioChart";
+import CategoricalAnalysis from "./components/CategoricalAnalysis";
 import FileDropZone from "./components/FileDropZone";
 import { LayoutDashboard, Trash2, Maximize2, Minimize2 } from "lucide-react";
 
@@ -214,8 +215,13 @@ const App: React.FC = () => {
                 </section>
 
                 {/* Positions Table */}
-                <section>
+                <section className="mb-8">
                     <PositionsTable positions={positions} />
+                </section>
+
+                {/* Categorical Analysis */}
+                <section>
+                    <CategoricalAnalysis positions={positions} />
                 </section>
             </main>
         </div>

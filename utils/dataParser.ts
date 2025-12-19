@@ -170,6 +170,10 @@ export const parseAccountDataFromJSON = (jsonData: any): AccountData | null => {
       risk_status: account.risk_status || '',
       initial_margin: parseNumber(account.initial_margin),
       maintenance_margin: parseNumber(account.maintenance_margin),
+      total_pl_unrealized_options: 0.0,
+      total_pl_unrealized_stocks: 0.0,
+      total_pl_realized_stocks: 0.0,
+      total_pl_potential: 0.0,
     };
   } catch (error) {
     console.error("Error parsing account data from JSON:", error);
@@ -289,4 +293,62 @@ export const formatPercentageOfPortfolio = (val: number | undefined) => {
 export const truncateString = (str: string, maxLength: number = 25) => {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength) + '...';
+};
+
+/**
+ * Extracts ticker symbol from position code.
+ * Handles formats like "US.TSLA" -> "TSLA" or "TSLA" -> "TSLA"
+ */
+export const extractTicker = (code: string): string => {
+  if (code.includes('.')) {
+    return code.split('.')[1];
+  }
+  return code;
+};
+
+/**
+ * Gets all unique tickers from positions array.
+ */
+export const getAvailableTickers = (positions: PositionData[]): string[] => {
+  const tickers = new Set<string>();
+  positions.forEach((pos) => {
+    const ticker = extractTicker(pos.code);
+    if (ticker) {
+      tickers.add(ticker.toUpperCase());
+    }
+  });
+  return Array.from(tickers).sort();
+};
+
+/**
+ * Finds positions matching a ticker (case-insensitive).
+ * Handles both full code and extracted ticker matching.
+ */
+export const findPositionsByTicker = (
+  positions: PositionData[],
+  ticker: string
+): PositionData[] => {
+  const upperTicker = ticker.toUpperCase();
+  return positions.filter((pos) => {
+    const extractedTicker = extractTicker(pos.code).toUpperCase();
+    const fullCode = pos.code.toUpperCase();
+    return extractedTicker === upperTicker || fullCode === upperTicker;
+  });
+};
+
+/**
+ * Validates that tickers exist in the positions array.
+ * Returns array of valid tickers.
+ */
+export const validateTickers = (
+  positions: PositionData[],
+  tickers: string[]
+): string[] => {
+  const availableTickers = getAvailableTickers(positions);
+  const availableSet = new Set(availableTickers);
+  
+  return tickers.filter((ticker) => {
+    const upperTicker = ticker.toUpperCase().trim();
+    return upperTicker && availableSet.has(upperTicker);
+  });
 };

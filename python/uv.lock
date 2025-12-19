@@ -29,7 +29,7 @@ wheels = [
 
 [[package]]
 name = "moomoo-api"
-version = "9.5.5508"
+version = "9.6.5608"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pandas" },
@@ -37,7 +37,7 @@ dependencies = [
     { name = "pycryptodome" },
     { name = "simplejson" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8a/56/2ca70c2a3be19f45594ea407a1519b88e6d5548cefdc578a69b1291bb772/moomoo_api-9.5.5508.tar.gz", hash = "sha256:3c412839d4f4241ac423a833b154d8fe89b35f59e7d9cf94ca0230d438fdc7f9", size = 4915301, upload-time = "2025-12-11T09:49:57.903Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8f/db/7a01fc09f7ee1767c39991eb4324c373682f91a05e097707ac77a69ec77b/moomoo_api-9.6.5608.tar.gz", hash = "sha256:2b244fb46236fb10c58808440bcc43c444abe242d974285f75ad251c2d984a50", size = 4915508, upload-time = "2025-12-17T08:53:27.534Z" }
 
 [[package]]
 name = "numpy"
