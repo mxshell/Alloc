@@ -120,7 +120,9 @@ def export_account_data_for_web(
 
         print(f"Querying account: '{acc_id}'")
 
-        ret, positions_data = trd_ctx.position_list_query(acc_id=acc_id)
+        ret, positions_data = trd_ctx.position_list_query(
+            acc_id=acc_id, refresh_cache=True
+        )
         if ret == RET_OK and positions_data.shape[0] > 0:
             positions_data: pd.DataFrame
             num_positions = positions_data.shape[0]
@@ -128,7 +130,9 @@ def export_account_data_for_web(
                 f"  [green bold]➜ Success[/green bold] {num_positions} positions found."
             )
 
-        ret, account_data = trd_ctx.accinfo_query(acc_id=acc_id, currency=Currency.USD)
+        ret, account_data = trd_ctx.accinfo_query(
+            acc_id=acc_id, currency=Currency.USD, refresh_cache=True
+        )
         if ret == RET_OK and account_data.shape[0] > 0:
             account_data: pd.DataFrame
             total_assets_value = account_data["total_assets"].values[0]
