@@ -1,16 +1,17 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { Treemap, ResponsiveContainer, Tooltip } from "recharts";
-import { PositionData, CategoricalGroup, SubGroupData } from "../types";
-import {
-    formatCurrency,
-    formatPercentageOfPortfolio,
-    extractTicker,
-    findPositionsByTicker,
-} from "../utils/dataParser";
+import { formatCurrency, formatPercentageOfPortfolio } from "../utils/dataParser";
+
+interface GroupChartDatum {
+    name: string;
+    size: number;
+    percentage: number;
+    tickers: string[];
+}
 
 interface GroupChartProps {
-    positions: PositionData[];
-    group: CategoricalGroup;
+    data: GroupChartDatum[];
+    emptyMessage?: string;
 }
 
 // Coastal Blues gradient palette (same as PortfolioChart)
@@ -70,7 +71,6 @@ const createCustomizedContent = (totalCount: number) => {
     return (props: any) => {
         const { x, y, width, height, index, name, percentage } = props;
 
-        // Select color based on relative position
         const reverseSelect = false;
         const selectId =
             totalCount > 0
@@ -83,7 +83,6 @@ const createCustomizedContent = (totalCount: number) => {
         const fill = COLORS[reverseSelect ? reversedSelectId : selectId];
         const textColor = "#ffffff";
 
-        // Don't render text for tiny boxes
         if (width < 30 || height < 30) return null;
 
         return (
@@ -145,86 +144,27 @@ const createCustomizedContent = (totalCount: number) => {
     };
 };
 
-const GroupChart: React.FC<GroupChartProps> = ({ positions, group }) => {
-    const data = useMemo(() => {
-        // Calculate sub-group totals
-        const subGroupMap = new Map<string, SubGroupData>();
-
-        // Process each ticker in the group
-        group.tickers.forEach((ticker) => {
-            const subGroupName = group.subGroups[ticker] || ticker;
-            const matchingPositions = findPositionsByTicker(positions, ticker);
-
-            // Sum market values for this ticker
-            const tickerValue = matchingPositions.reduce(
-                (sum, pos) => sum + Math.abs(pos.market_val),
-                0
-            );
-
-            // Add to sub-group
-            if (subGroupMap.has(subGroupName)) {
-                const existing = subGroupMap.get(subGroupName)!;
-                existing.value += tickerValue;
-                existing.tickers.push(ticker);
-            } else {
-                subGroupMap.set(subGroupName, {
-                    name: subGroupName,
-                    value: tickerValue,
-                    percentage: 0, // Will calculate after
-                    tickers: [ticker],
-                });
-            }
-        });
-
-        // Calculate total group value
-        const groupTotal = Array.from(subGroupMap.values()).reduce(
-            (sum, sg) => sum + sg.value,
-            0
-        );
-
-        // Calculate percentages relative to group total
-        const subGroups: SubGroupData[] = Array.from(subGroupMap.values()).map(
-            (sg) => ({
-                ...sg,
-                percentage: groupTotal > 0 ? (sg.value / groupTotal) * 100 : 0,
-            })
-        );
-
-        // Convert to chart data format and sort by value
-        return subGroups
-            .map((sg) => ({
-                name: sg.name,
-                size: sg.value,
-                percentage: sg.percentage,
-                tickers: sg.tickers,
-            }))
-            .sort((a, b) => b.size - a.size);
-    }, [positions, group]);
-
-    if (data.length === 0) {
+const GroupChart: React.FC<GroupChartProps> = ({ data, emptyMessage }) => {
+    if (!data || data.length === 0) {
         return (
-            <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-sm">
-                <p className="text-slate-400 text-sm">
-                    No data available for this group. Please add tickers to the
-                    group.
-                </p>
+            <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+                {emptyMessage ||
+                    "No data available for this group. Please add tickers to the group."}
             </div>
         );
     }
 
     return (
-        <div className="h-[400px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-                <Treemap
-                    data={data}
-                    dataKey="size"
-                    aspectRatio={1}
-                    content={createCustomizedContent(data.length)}
-                >
-                    <Tooltip content={<CustomTooltip />} />
-                </Treemap>
-            </ResponsiveContainer>
-        </div>
+        <ResponsiveContainer width="100%" height="100%">
+            <Treemap
+                data={data}
+                dataKey="size"
+                aspectRatio={1}
+                content={createCustomizedContent(data.length)}
+            >
+                <Tooltip content={<CustomTooltip />} />
+            </Treemap>
+        </ResponsiveContainer>
     );
 };
 

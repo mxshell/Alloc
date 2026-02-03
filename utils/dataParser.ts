@@ -237,7 +237,10 @@ export const parseJSONData = (jsonContent: string): { account: AccountData | nul
     const jsonData = JSON.parse(jsonContent);
     const account = parseAccountDataFromJSON(jsonData);
     const positions = parsePositionsDataFromJSON(jsonData);
-    const isOption = (code: string) => /[0-9]{6}[CP][0-9]+/.test(code);
+    const normalizeCodeForOptionCheck = (code: string) =>
+      code.includes('.') ? code.split('.')[1] : code;
+    const isOption = (code: string) =>
+      /^[A-Z]+[0-9]{6}[CP][0-9]+$/i.test(normalizeCodeForOptionCheck(code));
 
     const totalAssets = account?.total_assets || 0;
     // calculate the percentage of the portfolio for each position

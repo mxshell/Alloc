@@ -196,7 +196,10 @@ export const generateDemoData = (): string => {
   });
   
   // Calculate PL totals
-  const isOption = (code: string) => /[0-9]{6}[CP][0-9]+/.test(code);
+  const normalizeCodeForOptionCheck = (code: string) =>
+    code.includes('.') ? code.split('.')[1] : code;
+  const isOption = (code: string) =>
+    /^[A-Z]+[0-9]{6}[CP][0-9]+$/i.test(normalizeCodeForOptionCheck(code));
   const totalUnrealizedPlOptions = positions
     .filter(position => isOption(position.code))
     .reduce((acc, position) => acc + position.unrealized_pl, 0);
@@ -218,4 +221,3 @@ export const generateDemoData = (): string => {
     positions,
   }, null, 2);
 };
-
