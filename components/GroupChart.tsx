@@ -1,6 +1,9 @@
 import React from "react";
 import { Treemap, ResponsiveContainer, Tooltip } from "recharts";
-import { formatCurrency, formatPercentageOfPortfolio } from "../utils/dataParser";
+import {
+    formatCurrency,
+    formatPercentageOfPortfolio,
+} from "../utils/dataParser";
 
 interface GroupChartDatum {
     name: string;
@@ -159,7 +162,8 @@ const GroupChart: React.FC<GroupChartProps> = ({ data, emptyMessage }) => {
             <Treemap
                 data={data}
                 dataKey="size"
-                aspectRatio={1}
+                aspectRatio={4 / 3}
+                animationDuration={0}
                 content={createCustomizedContent(data.length)}
             >
                 <Tooltip content={<CustomTooltip />} />

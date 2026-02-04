@@ -228,6 +228,7 @@ const PortfolioChart: React.FC<PortfolioChartProps> = ({ positions }) => {
                         data={data}
                         dataKey="size"
                         aspectRatio={1}
+                        animationDuration={1000}
                         content={createCustomizedContent(data.length)}
                     >
                         <Tooltip content={<CustomTooltip />} />
