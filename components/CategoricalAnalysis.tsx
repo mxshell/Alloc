@@ -1,51 +1,20 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PositionData, CategoricalGroup } from "../types";
-import {
-    extractTicker,
-    formatCurrency,
-    formatPercentageOfPortfolio,
-} from "../utils/dataParser";
-import GroupChart from "./GroupChart";
-import {
-    Plus,
-    Edit2,
-    Trash2,
-    X,
-    Check,
-    AlertTriangle,
-} from "lucide-react";
+import { extractTicker, formatCurrency, formatPercentageOfPortfolio } from "../utils/dataParser";
+import { Plus, Trash2, Pencil, X } from "lucide-react";
 
 interface CategoricalAnalysisProps {
     positions: PositionData[];
 }
 
-interface GroupMemberRow {
-    ticker: string;
-    value: number;
-    percentageOfGroup: number;
+interface CategoryRowStats {
+    marketValue: number;
     percentageOfPortfolio: number;
-    isMissing: boolean;
-}
-
-interface GroupDetails {
-    id: string;
-    name: string;
-    tickers: string[];
-    totalValue: number;
-    percentageOfPortfolio: number;
-    missingTickers: string[];
-    members: GroupMemberRow[];
-    chartData: {
-        name: string;
-        size: number;
-        percentage: number;
-        tickers: string[];
-    }[];
 }
 
 const STORAGE_KEY = "Alloc_categorical_groups";
-const OTHERS_SUBGROUP_NAME = "Others";
-const UNASSIGNED_ID = "__unassigned__";
+const MANUAL_TICKER_STORAGE_KEY = "Alloc_categorical_manual_tickers";
+const UNASSIGNED_ROW_ID = "__unassigned__";
 
 const normalizeTicker = (ticker: string) => ticker.toUpperCase().trim();
 const normalizeCodeForOptionCheck = (code: string) =>
@@ -56,1051 +25,825 @@ const isOptionCode = (code: string) =>
 const uniqueTickers = (tickers: string[]) => {
     const seen = new Set<string>();
     const result: string[] = [];
+
     tickers.forEach((ticker) => {
         const normalized = normalizeTicker(ticker);
         if (!normalized || seen.has(normalized)) return;
         seen.add(normalized);
         result.push(normalized);
     });
+
     return result;
 };
 
-const normalizeSubGroupMap = (
-    tickers: string[],
-    subGroups: Record<string, string> | undefined
-) => {
-    const lookup = new Map<string, string>();
-    Object.entries(subGroups || {}).forEach(([key, value]) => {
-        lookup.set(normalizeTicker(key), value);
-    });
-
-    const normalized: Record<string, string> = {};
-    tickers.forEach((ticker) => {
-        const mapped = lookup.get(normalizeTicker(ticker));
-        const cleaned = mapped ? mapped.trim() : "";
-        normalized[ticker] = cleaned || ticker;
-    });
-
-    return normalized;
-};
-
-const buildTickerValueMap = (
-    positions: PositionData[],
-    includeOptions: boolean
-) => {
+const buildTickerValueMap = (positions: PositionData[]) => {
     const map = new Map<string, number>();
+
     positions.forEach((position) => {
-        if (!includeOptions && isOptionCode(position.code)) return;
+        if (isOptionCode(position.code)) return;
+
         const ticker = normalizeTicker(extractTicker(position.code));
         if (!ticker) return;
+
         const value = Math.abs(position.market_val);
         if (Number.isNaN(value)) return;
+
         map.set(ticker, (map.get(ticker) || 0) + value);
     });
+
     return map;
 };
 
-const buildGroupDetails = (
-    group: CategoricalGroup,
-    tickerValues: Map<string, number>,
-    portfolioTotal: number
-): GroupDetails => {
-    const tickers = uniqueTickers(group.tickers || []);
-    const subGroups = normalizeSubGroupMap(tickers, group.subGroups);
+const formatCompactCurrency = (value: number) => {
+    if (!Number.isFinite(value) || value === 0) return "$0";
 
-    const members: GroupMemberRow[] = tickers.map((ticker) => {
-        const value = tickerValues.get(ticker) || 0;
-        return {
-            ticker,
-            value,
-            percentageOfGroup: 0,
-            percentageOfPortfolio:
-                portfolioTotal > 0 ? (value / portfolioTotal) * 100 : 0,
-            isMissing: !tickerValues.has(ticker),
-        };
-    });
-
-    const totalValue = members.reduce((sum, row) => sum + row.value, 0);
-    members.forEach((row) => {
-        row.percentageOfGroup =
-            totalValue > 0 ? (row.value / totalValue) * 100 : 0;
-    });
-
-    const subGroupMap = new Map<
-        string,
-        { name: string; value: number; tickers: string[] }
-    >();
-
-    members.forEach((row) => {
-        const subGroupName = subGroups[row.ticker] || row.ticker;
-        const existing = subGroupMap.get(subGroupName) || {
-            name: subGroupName,
-            value: 0,
-            tickers: [],
-        };
-        existing.value += row.value;
-        existing.tickers.push(row.ticker);
-        subGroupMap.set(subGroupName, existing);
-    });
-
-    const chartData = Array.from(subGroupMap.values())
-        .map((subGroup) => ({
-            name: subGroup.name,
-            size: subGroup.value,
-            percentage:
-                totalValue > 0 ? (subGroup.value / totalValue) * 100 : 0,
-            tickers: subGroup.tickers,
-        }))
-        .filter((entry) => entry.size > 0)
-        .sort((a, b) => b.size - a.size);
-
-    return {
-        id: group.id,
-        name: group.name,
-        tickers,
-        totalValue,
-        percentageOfPortfolio:
-            portfolioTotal > 0 ? (totalValue / portfolioTotal) * 100 : 0,
-        missingTickers: members.filter((row) => row.isMissing).map((row) => row.ticker),
-        members: members.sort((a, b) => b.value - a.value),
-        chartData,
-    };
+    return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        notation: "compact",
+        maximumFractionDigits: 1,
+    }).format(value);
 };
 
-const buildUnassignedDetails = (
-    tickers: string[],
-    tickerValues: Map<string, number>,
-    portfolioTotal: number
-): GroupDetails => {
-    const members: GroupMemberRow[] = tickers.map((ticker) => {
-        const value = tickerValues.get(ticker) || 0;
-        return {
-            ticker,
-            value,
-            percentageOfGroup: 0,
-            percentageOfPortfolio:
-                portfolioTotal > 0 ? (value / portfolioTotal) * 100 : 0,
-            isMissing: false,
-        };
-    });
-
-    const totalValue = members.reduce((sum, row) => sum + row.value, 0);
-    members.forEach((row) => {
-        row.percentageOfGroup =
-            totalValue > 0 ? (row.value / totalValue) * 100 : 0;
-    });
-
-    const chartData = members
-        .filter((row) => row.value > 0)
-        .map((row) => ({
-            name: row.ticker,
-            size: row.value,
-            percentage: row.percentageOfGroup,
-            tickers: [row.ticker],
-        }))
-        .sort((a, b) => b.size - a.size);
-
-    return {
-        id: UNASSIGNED_ID,
-        name: "Unassigned",
-        tickers,
-        totalValue,
-        percentageOfPortfolio:
-            portfolioTotal > 0 ? (totalValue / portfolioTotal) * 100 : 0,
-        missingTickers: [],
-        members: members.sort((a, b) => b.value - a.value),
-        chartData,
-    };
+const formatTickerRelativeText = (value: number, rowTotalValue: number) => {
+    const percentage =
+        rowTotalValue > 0 ? (value / rowTotalValue) * 100 : 0;
+    return `${formatCompactCurrency(value)} · ${formatPercentageOfPortfolio(
+        percentage
+    )}`;
 };
 
-const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
-    positions,
-}) => {
+const sanitizeGroups = (input: any[]): CategoricalGroup[] => {
+    const seen = new Set<string>();
+
+    return input
+        .filter((entry) => entry && typeof entry.name === "string")
+        .map((entry, index) => {
+            const cleanTickers = uniqueTickers(
+                Array.isArray(entry.tickers) ? entry.tickers.map((ticker: any) => String(ticker)) : []
+            ).filter((ticker) => {
+                if (seen.has(ticker)) return false;
+                seen.add(ticker);
+                return true;
+            });
+
+            return {
+                id: String(entry.id || `category_${Date.now()}_${index}`),
+                name: String(entry.name || `Category ${index + 1}`).trim(),
+                tickers: cleanTickers,
+                subGroups: {},
+            } as CategoricalGroup;
+        })
+        .filter((group) => group.name.length > 0);
+};
+
+const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) => {
     const [groups, setGroups] = useState<CategoricalGroup[]>([]);
-    const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-    const [isCreatingNew, setIsCreatingNew] = useState(false);
-    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+    const [manualTickers, setManualTickers] = useState<string[]>([]);
+
+    const [newCategoryName, setNewCategoryName] = useState("");
+    const [newTickerInput, setNewTickerInput] = useState("");
+
+    const [draggedTicker, setDraggedTicker] = useState<string | null>(null);
+    const [dragOverRowId, setDragOverRowId] = useState<string | null>(null);
+    const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
+    const dragOverRowIdRef = useRef<string | null>(null);
+    const pointerDraggedTickerRef = useRef<string | null>(null);
+    const pointerIdRef = useRef<number | null>(null);
+    const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+    const [editingCategoryName, setEditingCategoryName] = useState("");
+
     const [hasLoaded, setHasLoaded] = useState(false);
-    const [includeOptions, setIncludeOptions] = useState(false);
 
     useEffect(() => {
         try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
+            const storedGroups = localStorage.getItem(STORAGE_KEY);
+            if (storedGroups) {
+                const parsed = JSON.parse(storedGroups);
                 if (Array.isArray(parsed)) {
-                    const sanitized = parsed
-                        .filter((group) => group && group.name)
-                        .map((group) => ({
-                            id: String(group.id || Date.now()),
-                            name: String(group.name || "Unnamed"),
-                            tickers: Array.isArray(group.tickers)
-                                ? group.tickers.map((ticker: string) =>
-                                      normalizeTicker(String(ticker))
-                                  )
-                                : [],
-                            subGroups:
-                                group.subGroups && typeof group.subGroups === "object"
-                                    ? group.subGroups
-                                    : {},
-                        }));
-                    setGroups(sanitized);
+                    setGroups(sanitizeGroups(parsed));
                 }
             }
-        } catch (e) {
-            console.error(
-                "Failed to load categorical groups from localStorage",
-                e
-            );
-        } finally {
-            setHasLoaded(true);
+        } catch (error) {
+            console.error("Failed to load categorical groups", error);
         }
+
+        try {
+            const storedManualTickers = localStorage.getItem(MANUAL_TICKER_STORAGE_KEY);
+            if (storedManualTickers) {
+                const parsed = JSON.parse(storedManualTickers);
+                if (Array.isArray(parsed)) {
+                    setManualTickers(uniqueTickers(parsed.map((entry) => String(entry))));
+                }
+            }
+        } catch (error) {
+            console.error("Failed to load manual ticker pool", error);
+        }
+
+        setHasLoaded(true);
     }, []);
 
     useEffect(() => {
         if (!hasLoaded) return;
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(groups));
-        } catch (e) {
-            console.error(
-                "Failed to save categorical groups to localStorage",
-                e
-            );
+        } catch (error) {
+            console.error("Failed to save categorical groups", error);
         }
     }, [groups, hasLoaded]);
 
-    const {
-        tickerValues,
-        portfolioTotal,
-        unassignedTickers,
-        groupDetails,
-        assignedValue,
-    } = useMemo(() => {
-        const tickerValues = buildTickerValueMap(positions, includeOptions);
-        const portfolioTotal = Array.from(tickerValues.values()).reduce(
-            (sum, value) => sum + value,
-            0
-        );
+    useEffect(() => {
+        if (!hasLoaded) return;
+        try {
+            localStorage.setItem(
+                MANUAL_TICKER_STORAGE_KEY,
+                JSON.stringify(uniqueTickers(manualTickers))
+            );
+        } catch (error) {
+            console.error("Failed to save manual ticker pool", error);
+        }
+    }, [manualTickers, hasLoaded]);
 
-        const assignedTickers = new Set<string>();
-        const details = new Map<string, GroupDetails>();
-        let assignedValue = 0;
+    const tickerValues = useMemo(() => buildTickerValueMap(positions), [positions]);
 
+    const portfolioTotal = useMemo(() => {
+        let total = 0;
+        tickerValues.forEach((value) => {
+            total += value;
+        });
+        return total;
+    }, [tickerValues]);
+
+    const assignedTickers = useMemo(() => {
+        const set = new Set<string>();
         groups.forEach((group) => {
-            const detail = buildGroupDetails(group, tickerValues, portfolioTotal);
-            details.set(group.id, detail);
-            detail.tickers.forEach((ticker) => assignedTickers.add(ticker));
-            assignedValue += detail.totalValue;
+            group.tickers.forEach((ticker) => set.add(normalizeTicker(ticker)));
+        });
+        return set;
+    }, [groups]);
+
+    const allKnownTickers = useMemo(() => {
+        const known = new Set<string>();
+
+        tickerValues.forEach((_value, ticker) => known.add(ticker));
+        manualTickers.forEach((ticker) => known.add(normalizeTicker(ticker)));
+        groups.forEach((group) => {
+            group.tickers.forEach((ticker) => known.add(normalizeTicker(ticker)));
         });
 
-        const unassignedTickers = Array.from(tickerValues.keys())
-            .filter((ticker) => !assignedTickers.has(ticker))
-            .sort();
+        return Array.from(known).sort((a, b) => {
+            const valueDiff = (tickerValues.get(b) || 0) - (tickerValues.get(a) || 0);
+            if (valueDiff !== 0) return valueDiff;
+            return a.localeCompare(b);
+        });
+    }, [groups, manualTickers, tickerValues]);
 
-        return {
-            tickerValues,
-            portfolioTotal,
-            unassignedTickers,
-            groupDetails: details,
-            assignedValue,
-        };
-    }, [positions, groups, includeOptions]);
+    const unassignedTickers = useMemo(
+        () => allKnownTickers.filter((ticker) => !assignedTickers.has(ticker)),
+        [allKnownTickers, assignedTickers]
+    );
 
-    useEffect(() => {
-        if (isCreatingNew || editingGroupId) return;
-        if (selectedGroupId === UNASSIGNED_ID) return;
-        if (selectedGroupId && groups.some((g) => g.id === selectedGroupId)) return;
-
-        if (groups.length > 0) {
-            setSelectedGroupId(groups[0].id);
-        } else if (unassignedTickers.length > 0) {
-            setSelectedGroupId(UNASSIGNED_ID);
-        } else {
-            setSelectedGroupId(null);
-        }
-    }, [
-        groups,
-        selectedGroupId,
-        unassignedTickers.length,
-        isCreatingNew,
-        editingGroupId,
-    ]);
-
-    const portfolioTickers = useMemo(
-        () => Array.from(tickerValues.keys()).sort(),
+    const sortTickersByPositionValue = useCallback(
+        (tickers: string[]) =>
+            uniqueTickers(tickers).sort((a, b) => {
+                const valueDiff = (tickerValues.get(b) || 0) - (tickerValues.get(a) || 0);
+                if (valueDiff !== 0) return valueDiff;
+                return a.localeCompare(b);
+            }),
         [tickerValues]
     );
 
-    const handleCreateGroup = () => {
-        setIsCreatingNew(true);
-        setEditingGroupId(null);
-    };
-
-    const handleResetGroups = () => {
-        if (confirm("Clear all categorical groups and start fresh?")) {
-            setGroups([]);
-            setEditingGroupId(null);
-            setIsCreatingNew(false);
-            setSelectedGroupId(null);
-            try {
-                localStorage.removeItem(STORAGE_KEY);
-            } catch (e) {
-                console.error("Failed to clear categorical groups", e);
-            }
-        }
-    };
-
-    const handleSaveGroup = (groupData: {
-        name: string;
-        tickers: string[];
-        subGroups: Record<string, string>;
-    }) => {
-        const cleanedTickers = uniqueTickers(groupData.tickers);
-        const subGroups = normalizeSubGroupMap(cleanedTickers, groupData.subGroups);
-        let nextGroups = [...groups];
-        let savedGroupId = editingGroupId;
-
-        if (editingGroupId) {
-            nextGroups = nextGroups.map((group) =>
-                group.id === editingGroupId
-                    ? {
-                          ...group,
-                          name: groupData.name.trim(),
-                          tickers: cleanedTickers,
-                          subGroups,
-                      }
-                    : group
+    const computeRowStats = useCallback(
+        (tickers: string[]): CategoryRowStats => {
+            const marketValue = tickers.reduce(
+                (sum, ticker) => sum + (tickerValues.get(ticker) || 0),
+                0
             );
-        } else {
-            const newGroup: CategoricalGroup = {
-                id: Date.now().toString(),
-                name: groupData.name.trim(),
-                tickers: cleanedTickers,
-                subGroups,
-            };
-            savedGroupId = newGroup.id;
-            nextGroups = [...nextGroups, newGroup];
-        }
 
-        if (savedGroupId) {
-            const assignedSet = new Set(cleanedTickers);
-            nextGroups = nextGroups.map((group) => {
-                if (group.id === savedGroupId) return group;
-                const filteredTickers = group.tickers.filter(
-                    (ticker) => !assignedSet.has(normalizeTicker(ticker))
-                );
-                if (filteredTickers.length === group.tickers.length) return group;
-                const filteredSubGroups = normalizeSubGroupMap(
-                    filteredTickers,
-                    group.subGroups
-                );
+            return {
+                marketValue,
+                percentageOfPortfolio:
+                    portfolioTotal > 0 ? (marketValue / portfolioTotal) * 100 : 0,
+            };
+        },
+        [portfolioTotal, tickerValues]
+    );
+
+    const getGroupMarketValue = useCallback(
+        (group: CategoricalGroup) =>
+            group.tickers.reduce(
+                (sum, ticker) => sum + (tickerValues.get(normalizeTicker(ticker)) || 0),
+                0
+            ),
+        [tickerValues]
+    );
+
+    const sortedGroups = useMemo(
+        () =>
+            [...groups].sort((a, b) => {
+                const valueDiff = getGroupMarketValue(b) - getGroupMarketValue(a);
+                if (valueDiff !== 0) return valueDiff;
+                return a.name.localeCompare(b.name);
+            }),
+        [getGroupMarketValue, groups]
+    );
+
+    const moveTickerToRow = useCallback((tickerInput: string, targetGroupId: string | null) => {
+        const ticker = normalizeTicker(tickerInput);
+        if (!ticker) return;
+
+        setGroups((prev) => {
+            const withoutTicker = prev.map((group) => ({
+                ...group,
+                tickers: sortTickersByPositionValue(
+                    group.tickers.filter(
+                        (entry) => normalizeTicker(entry) !== ticker
+                    )
+                ),
+                subGroups: {},
+            }));
+
+            if (!targetGroupId) {
+                return withoutTicker;
+            }
+
+            return withoutTicker.map((group) => {
+                if (group.id !== targetGroupId) return group;
                 return {
                     ...group,
-                    tickers: filteredTickers,
-                    subGroups: filteredSubGroups,
+                    tickers: sortTickersByPositionValue([...group.tickers, ticker]),
+                    subGroups: {},
                 };
             });
-        }
-
-        setGroups(nextGroups);
-        setEditingGroupId(null);
-        setIsCreatingNew(false);
-        if (savedGroupId) {
-            setSelectedGroupId(savedGroupId);
-        }
-    };
-
-    const handleDeleteGroup = (id: string) => {
-        if (confirm("Are you sure you want to delete this group?")) {
-            setGroups((prev) => prev.filter((g) => g.id !== id));
-            if (selectedGroupId === id) {
-                setSelectedGroupId(null);
-            }
-        }
-    };
-
-    const handleCancelEdit = () => {
-        setEditingGroupId(null);
-        setIsCreatingNew(false);
-    };
-
-    const selectedDetails = useMemo(() => {
-        if (selectedGroupId === UNASSIGNED_ID) {
-            return buildUnassignedDetails(
-                unassignedTickers,
-                tickerValues,
-                portfolioTotal
-            );
-        }
-        if (selectedGroupId) {
-            return groupDetails.get(selectedGroupId) || null;
-        }
-        return null;
-    }, [
-        selectedGroupId,
-        unassignedTickers,
-        tickerValues,
-        portfolioTotal,
-        groupDetails,
-    ]);
-
-    const assignedCoverage =
-        portfolioTotal > 0 ? (assignedValue / portfolioTotal) * 100 : 0;
-
-    return (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 shadow-sm mb-8">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
-                <div>
-                    <h2 className="text-lg font-bold text-white">
-                        Categorical Analysis
-                    </h2>
-                    <p className="text-sm text-slate-400">
-                        Build custom groups to compare allocation between
-                        categories and drill into what makes up each group.
-                    </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2 text-xs text-slate-300 bg-slate-700/60 px-3 py-2 rounded-lg">
-                        <input
-                            type="checkbox"
-                            checked={includeOptions}
-                            onChange={(e) => setIncludeOptions(e.target.checked)}
-                            className="accent-blue-500"
-                        />
-                        Include options
-                    </label>
-                    <button
-                        onClick={handleResetGroups}
-                        className="flex items-center gap-2 px-3 py-2 bg-slate-700/60 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors text-sm font-medium"
-                    >
-                        <Trash2 className="h-4 w-4" />
-                        Reset Groups
-                    </button>
-                    <button
-                        onClick={handleCreateGroup}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
-                    >
-                        <Plus className="h-4 w-4" />
-                        Add Group
-                    </button>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="space-y-4 lg:col-span-1">
-                    <div className="bg-slate-750 border border-slate-700 rounded-lg p-4">
-                        <div className="flex items-start justify-between gap-3 mb-4">
-                            <div>
-                                <h3 className="text-sm font-semibold text-white">
-                                    Group Comparison
-                                </h3>
-                                <p className="text-xs text-slate-400">
-                                    Assigned: {assignedCoverage.toFixed(1)}%
-                                </p>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-xs text-slate-400">
-                                    Total
-                                </div>
-                                <div className="text-sm text-white font-semibold">
-                                    {formatCurrency(portfolioTotal)}
-                                </div>
-                            </div>
-                        </div>
-
-                        {groups.length === 0 && unassignedTickers.length === 0 && (
-                            <div className="text-sm text-slate-400 py-4">
-                                No positions available for grouping.
-                            </div>
-                        )}
-
-                        <div className="space-y-2">
-                            {groups.map((group) => {
-                                const details = groupDetails.get(group.id);
-                                if (!details) return null;
-                                const isSelected = selectedGroupId === group.id;
-                                return (
-                                    <div
-                                        key={group.id}
-                                        className={`border rounded-lg p-3 transition-colors ${
-                                            isSelected
-                                                ? "border-blue-500/70 bg-blue-500/10"
-                                                : "border-slate-700 bg-slate-800/60 hover:bg-slate-700/60"
-                                        }`}
-                                        onClick={() => {
-                                            setSelectedGroupId(group.id);
-                                            setEditingGroupId(null);
-                                            setIsCreatingNew(false);
-                                        }}
-                                    >
-                                        <div className="flex items-start justify-between gap-2">
-                                            <div>
-                                                <div className="text-sm font-semibold text-white">
-                                                    {details.name}
-                                                </div>
-                                                <div className="text-xs text-slate-400">
-                                                    {details.tickers.length} tickers
-                                                    {details.missingTickers.length > 0
-                                                        ? ` · ${details.missingTickers.length} missing`
-                                                        : ""}
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        setEditingGroupId(group.id);
-                                                        setIsCreatingNew(false);
-                                                        setSelectedGroupId(group.id);
-                                                    }}
-                                                    className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded"
-                                                    title="Edit Group"
-                                                >
-                                                    <Edit2 className="h-4 w-4" />
-                                                </button>
-                                                <button
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        handleDeleteGroup(group.id);
-                                                    }}
-                                                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded"
-                                                    title="Delete Group"
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div className="mt-3">
-                                            <div className="flex items-center justify-between text-xs text-slate-300 mb-1">
-                                                <span>
-                                                    {formatCurrency(details.totalValue)}
-                                                </span>
-                                                <span>
-                                                    {formatPercentageOfPortfolio(
-                                                        details.percentageOfPortfolio
-                                                    )}
-                                                </span>
-                                            </div>
-                                            <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                                                <div
-                                                    className="h-full bg-blue-500 rounded-full"
-                                                    style={{
-                                                        width: `${Math.min(
-                                                            details.percentageOfPortfolio,
-                                                            100
-                                                        )}%`,
-                                                    }}
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-
-                            {unassignedTickers.length > 0 && (
-                                <div
-                                    className={`border rounded-lg p-3 transition-colors ${
-                                        selectedGroupId === UNASSIGNED_ID
-                                            ? "border-amber-400/70 bg-amber-500/10"
-                                            : "border-slate-700 bg-slate-800/60 hover:bg-slate-700/60"
-                                    }`}
-                                    onClick={() => {
-                                        setSelectedGroupId(UNASSIGNED_ID);
-                                        setEditingGroupId(null);
-                                        setIsCreatingNew(false);
-                                    }}
-                                >
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div>
-                                            <div className="text-sm font-semibold text-white">
-                                                Unassigned
-                                            </div>
-                                            <div className="text-xs text-slate-400">
-                                                {unassignedTickers.length} tickers
-                                            </div>
-                                        </div>
-                                        <div className="text-xs text-amber-300">
-                                            Needs grouping
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {groups.length === 0 && !isCreatingNew && (
-                        <div className="text-sm text-slate-400 bg-slate-750 border border-slate-700 rounded-lg p-4">
-                            <p className="mb-2">No groups yet.</p>
-                            <p className="text-xs">
-                                Add a group to start comparing allocation between
-                                custom categories.
-                            </p>
-                        </div>
-                    )}
-                </div>
-
-                <div className="space-y-4 lg:col-span-2">
-                    {isCreatingNew && (
-                        <div className="bg-slate-750 border border-slate-700 rounded-lg p-4">
-                            <GroupEditor
-                                portfolioTickers={portfolioTickers}
-                                allGroups={groups}
-                                currentGroupId={null}
-                                onSave={handleSaveGroup}
-                                onCancel={handleCancelEdit}
-                            />
-                        </div>
-                    )}
-
-                    {!isCreatingNew && editingGroupId && (
-                        <div className="bg-slate-750 border border-slate-700 rounded-lg p-4">
-                            <GroupEditor
-                                portfolioTickers={portfolioTickers}
-                                allGroups={groups}
-                                currentGroupId={editingGroupId}
-                                initialData={groups.find(
-                                    (group) => group.id === editingGroupId
-                                )}
-                                onSave={handleSaveGroup}
-                                onCancel={handleCancelEdit}
-                            />
-                        </div>
-                    )}
-
-                    {!isCreatingNew && !editingGroupId && selectedDetails && (
-                        <GroupDetail
-                            details={selectedDetails}
-                            isUnassigned={selectedDetails.id === UNASSIGNED_ID}
-                        />
-                    )}
-
-                    {!isCreatingNew && !editingGroupId && !selectedDetails && (
-                        <div className="bg-slate-750 border border-slate-700 rounded-lg p-6 text-sm text-slate-400">
-                            Select a group to see its breakdown, or create a new
-                            group to start comparing allocations.
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-interface GroupDetailProps {
-    details: GroupDetails;
-    isUnassigned: boolean;
-}
-
-const GroupDetail: React.FC<GroupDetailProps> = ({ details, isUnassigned }) => {
-    return (
-        <div className="bg-slate-750 border border-slate-700 rounded-lg p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                    <h3 className="text-base font-semibold text-white">
-                        {details.name}
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                        {details.tickers.length} tickers ·{" "}
-                        {formatCurrency(details.totalValue)} ·{" "}
-                        {formatPercentageOfPortfolio(
-                            details.percentageOfPortfolio
-                        )}
-                    </p>
-                </div>
-                {details.missingTickers.length > 0 && (
-                    <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 px-3 py-2 rounded-lg">
-                        <AlertTriangle className="h-4 w-4" />
-                        {details.missingTickers.length} ticker
-                        {details.missingTickers.length !== 1 ? "s" : ""} not
-                        in portfolio
-                    </div>
-                )}
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
-                <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-4">
-                    <div className="text-sm font-semibold text-white mb-3">
-                        {isUnassigned ? "Unassigned Breakdown" : "Group Breakdown"}
-                    </div>
-                    <div className="h-[360px]">
-                        <GroupChart
-                            data={details.chartData}
-                            emptyMessage={
-                                isUnassigned
-                                    ? "All unassigned tickers currently have 0 market value."
-                                    : "No market value in this group yet."
-                            }
-                        />
-                    </div>
-                </div>
-
-                <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-4">
-                    <div className="text-sm font-semibold text-white mb-3">
-                        Members
-                    </div>
-                    {details.members.length === 0 ? (
-                        <div className="text-sm text-slate-400">
-                            No tickers in this group yet.
-                        </div>
-                    ) : (
-                        <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                            {details.members.map((member) => (
-                                <div
-                                    key={member.ticker}
-                                    className="flex items-center justify-between gap-3 border border-slate-700/70 rounded-lg px-3 py-2"
-                                >
-                                    <div>
-                                        <div className="text-sm text-white font-semibold">
-                                            {member.ticker}
-                                        </div>
-                                        <div className="text-xs text-slate-400">
-                                            {formatPercentageOfPortfolio(
-                                                member.percentageOfGroup
-                                            )} of group ·{" "}
-                                            {formatPercentageOfPortfolio(
-                                                member.percentageOfPortfolio
-                                            )} of portfolio
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-sm text-white font-semibold">
-                                            {formatCurrency(member.value)}
-                                        </div>
-                                        {member.isMissing && (
-                                            <div className="text-xs text-amber-300">
-                                                Missing
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
-interface GroupEditorProps {
-    portfolioTickers: string[];
-    allGroups: CategoricalGroup[];
-    currentGroupId: string | null;
-    initialData?: CategoricalGroup;
-    onSave: (data: {
-        name: string;
-        tickers: string[];
-        subGroups: Record<string, string>;
-    }) => void;
-    onCancel: () => void;
-}
-
-const GroupEditor: React.FC<GroupEditorProps> = ({
-    portfolioTickers,
-    allGroups,
-    currentGroupId,
-    initialData,
-    onSave,
-    onCancel,
-}) => {
-    const initialTickers = uniqueTickers(initialData?.tickers || []);
-    const [name, setName] = useState(initialData?.name || "");
-    const [tickers, setTickers] = useState<string[]>(initialTickers);
-    const [subGroups, setSubGroups] = useState<Record<string, string>>(
-        normalizeSubGroupMap(initialTickers, initialData?.subGroups)
-    );
-    const [tickerInput, setTickerInput] = useState("");
-    const [showAdvanced, setShowAdvanced] = useState(false);
-
-    const otherGroupTickers = useMemo(() => {
-        const used = new Set<string>();
-        allGroups.forEach((group) => {
-            if (group.id === currentGroupId) return;
-            group.tickers.forEach((ticker) => used.add(normalizeTicker(ticker)));
         });
-        return used;
-    }, [allGroups, currentGroupId]);
 
-    const availableTickers = useMemo(
-        () =>
-            portfolioTickers.filter(
-                (ticker) => !otherGroupTickers.has(normalizeTicker(ticker))
-            ),
-        [portfolioTickers, otherGroupTickers]
-    );
+        setManualTickers((prev) => uniqueTickers([...prev, ticker]));
+    }, [sortTickersByPositionValue]);
 
-    const selectedSet = useMemo(
-        () => new Set(tickers.map((ticker) => normalizeTicker(ticker))),
-        [tickers]
-    );
+    const removeManualTickerEverywhere = useCallback((tickerInput: string) => {
+        const ticker = normalizeTicker(tickerInput);
+        if (!ticker) return;
 
-    const filteredTickers = useMemo(() => {
-        const query = tickerInput.trim().toLowerCase();
-        if (!query) {
-            return availableTickers.filter(
-                (ticker) => !selectedSet.has(normalizeTicker(ticker))
-            );
-        }
-        return availableTickers.filter(
-            (ticker) =>
-                ticker.toLowerCase().includes(query) &&
-                !selectedSet.has(normalizeTicker(ticker))
+        setManualTickers((prev) => prev.filter((entry) => normalizeTicker(entry) !== ticker));
+        setGroups((prev) =>
+            prev.map((group) => ({
+                ...group,
+                tickers: group.tickers.filter((entry) => normalizeTicker(entry) !== ticker),
+                subGroups: {},
+            }))
         );
-    }, [availableTickers, tickerInput, selectedSet]);
+    }, []);
 
-    const conflictingTickers = tickers.filter((ticker) =>
-        otherGroupTickers.has(normalizeTicker(ticker))
-    );
+    const handleAddCategory = () => {
+        const name = newCategoryName.trim();
+        if (!name) return;
+
+        const id = `category_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        setGroups((prev) => [...prev, { id, name, tickers: [], subGroups: {} }]);
+        setNewCategoryName("");
+    };
+
+    const handleStartInlineRename = (group: CategoricalGroup) => {
+        setEditingCategoryId(group.id);
+        setEditingCategoryName(group.name);
+    };
+
+    const handleCancelInlineRename = () => {
+        setEditingCategoryId(null);
+        setEditingCategoryName("");
+    };
+
+    const handleCommitInlineRename = () => {
+        if (!editingCategoryId) return;
+        const cleaned = editingCategoryName.trim();
+        if (!cleaned) {
+            handleCancelInlineRename();
+            return;
+        }
+
+        setGroups((prev) =>
+            prev.map((entry) =>
+                entry.id === editingCategoryId ? { ...entry, name: cleaned } : entry
+            )
+        );
+        handleCancelInlineRename();
+    };
+
+    const handleDeleteCategory = (groupId: string) => {
+        const targetGroup = groups.find((group) => group.id === groupId);
+        if (!targetGroup) return;
+
+        if (
+            targetGroup.tickers.length > 0 &&
+            !confirm("Delete this category? Tickers will move to Unassigned.")
+        ) {
+            return;
+        }
+
+        setGroups((prev) => prev.filter((group) => group.id !== groupId));
+        if (editingCategoryId === groupId) {
+            handleCancelInlineRename();
+        }
+    };
+
+    const handleAddTicker = () => {
+        const ticker = normalizeTicker(newTickerInput);
+        if (!ticker) return;
+
+        moveTickerToRow(ticker, null);
+
+        setNewTickerInput("");
+    };
+
+    const clearPointerDrag = useCallback(() => {
+        pointerDraggedTickerRef.current = null;
+        pointerIdRef.current = null;
+        dragOverRowIdRef.current = null;
+        setDraggedTicker(null);
+        setDragOverRowId(null);
+        setDragPointer(null);
+    }, []);
+
+    const getDropRowIdAtPoint = useCallback((x: number, y: number) => {
+        const target = document.elementFromPoint(x, y) as HTMLElement | null;
+        if (!target) return null;
+
+        const zone = target.closest<HTMLElement>("[data-drop-row-id]");
+        return zone?.getAttribute("data-drop-row-id") || null;
+    }, []);
+
+    const handleChipPointerDown = (
+        event: React.PointerEvent,
+        tickerInput: string
+    ) => {
+        if (event.button !== 0) return;
+        const ticker = normalizeTicker(tickerInput);
+        if (!ticker) return;
+
+        pointerIdRef.current = event.pointerId;
+        pointerDraggedTickerRef.current = ticker;
+        setDraggedTicker(ticker);
+        setDragPointer({ x: event.clientX, y: event.clientY });
+        setDragOverRowId(null);
+        dragOverRowIdRef.current = null;
+        event.preventDefault();
+        event.stopPropagation();
+    };
 
     useEffect(() => {
-        setSubGroups((prev) => {
-            const next = { ...prev };
-            const tickerSet = new Set(tickers);
-            tickers.forEach((ticker) => {
-                if (!next[ticker]) {
-                    next[ticker] = ticker;
-                }
+        const handlePointerMove = (event: PointerEvent) => {
+            if (!pointerDraggedTickerRef.current) return;
+            if (
+                pointerIdRef.current !== null &&
+                event.pointerId !== pointerIdRef.current
+            ) {
+                return;
+            }
+
+            setDragPointer({ x: event.clientX, y: event.clientY });
+
+            const rowId = getDropRowIdAtPoint(event.clientX, event.clientY);
+            dragOverRowIdRef.current = rowId;
+            setDragOverRowId((prev) => (prev === rowId ? prev : rowId));
+        };
+
+        const handlePointerUp = (event: PointerEvent) => {
+            const pointerTicker = pointerDraggedTickerRef.current;
+            if (!pointerTicker) return;
+            if (
+                pointerIdRef.current !== null &&
+                event.pointerId !== pointerIdRef.current
+            ) {
+                return;
+            }
+
+            const rowId = getDropRowIdAtPoint(event.clientX, event.clientY);
+
+            if (rowId) {
+                moveTickerToRow(
+                    pointerTicker,
+                    rowId === UNASSIGNED_ROW_ID ? null : rowId
+                );
+            }
+
+            clearPointerDrag();
+        };
+
+        const handlePointerCancel = (event: PointerEvent) => {
+            if (!pointerDraggedTickerRef.current) return;
+            if (
+                pointerIdRef.current !== null &&
+                event.pointerId !== pointerIdRef.current
+            ) {
+                return;
+            }
+            clearPointerDrag();
+        };
+
+        const handleWindowBlur = () => {
+            if (!pointerDraggedTickerRef.current) return;
+            clearPointerDrag();
+        };
+
+        window.addEventListener("pointermove", handlePointerMove);
+        window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerCancel);
+        window.addEventListener("blur", handleWindowBlur);
+
+        return () => {
+            window.removeEventListener("pointermove", handlePointerMove);
+            window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointercancel", handlePointerCancel);
+            window.removeEventListener("blur", handleWindowBlur);
+        };
+    }, [clearPointerDrag, getDropRowIdAtPoint, moveTickerToRow]);
+
+    useEffect(() => {
+        dragOverRowIdRef.current = dragOverRowId;
+    }, [dragOverRowId]);
+
+    useEffect(() => {
+        if (!hasLoaded) return;
+
+        setGroups((prev) => {
+            let changed = false;
+
+            const normalized = prev.map((group) => {
+                const sortedTickers = sortTickersByPositionValue(group.tickers);
+                const sameOrder =
+                    sortedTickers.length === group.tickers.length &&
+                    sortedTickers.every((ticker, index) => ticker === group.tickers[index]);
+
+                if (sameOrder) return group;
+
+                changed = true;
+                return {
+                    ...group,
+                    tickers: sortedTickers,
+                    subGroups: {},
+                };
             });
-            Object.keys(next).forEach((key) => {
-                if (!tickerSet.has(key)) {
-                    delete next[key];
-                }
-            });
-            return next;
+
+            return changed ? normalized : prev;
         });
-    }, [tickers]);
+    }, [hasLoaded, sortTickersByPositionValue]);
 
-    const handleAddTicker = (ticker: string) => {
-        const normalized = normalizeTicker(ticker);
-        if (!normalized || selectedSet.has(normalized)) return;
-        setTickers((prev) => [...prev, normalized]);
-        setTickerInput("");
-    };
-
-    const handleAddManualTickers = () => {
-        if (!tickerInput.trim()) return;
-        const inputTickers = tickerInput
-            .split(/[\s,\n]+/)
-            .map((entry) => normalizeTicker(entry))
-            .filter(Boolean);
-
-        if (inputTickers.length === 0) return;
-
-        setTickers((prev) => {
-            const next = new Set(prev.map(normalizeTicker));
-            inputTickers.forEach((ticker) => next.add(ticker));
-            return Array.from(next);
-        });
-        setTickerInput("");
-    };
-
-    const handleRemoveTicker = (ticker: string) => {
-        setTickers((prev) => prev.filter((entry) => entry !== ticker));
-        setSubGroups((prev) => {
-            const next = { ...prev };
-            delete next[ticker];
-            return next;
-        });
-    };
-
-    const handleAddRemainingAsOthers = () => {
-        const remaining = availableTickers.filter(
-            (ticker) => !selectedSet.has(normalizeTicker(ticker))
-        );
-        if (remaining.length === 0) return;
-
-        setTickers((prev) => {
-            const next = new Set(prev.map(normalizeTicker));
-            remaining.forEach((ticker) => next.add(normalizeTicker(ticker)));
-            return Array.from(next);
-        });
-        setSubGroups((prev) => {
-            const next = { ...prev };
-            remaining.forEach((ticker) => {
-                next[normalizeTicker(ticker)] = OTHERS_SUBGROUP_NAME;
-            });
-            return next;
-        });
-    };
-
-    const handleSave = () => {
-        if (!name.trim()) {
-            alert("Please enter a group name");
-            return;
+    useEffect(() => {
+        if (!editingCategoryId) return;
+        const exists = groups.some((group) => group.id === editingCategoryId);
+        if (!exists) {
+            handleCancelInlineRename();
         }
-        if (tickers.length === 0) {
-            alert("Please add at least one ticker");
-            return;
-        }
+    }, [editingCategoryId, groups]);
 
-        onSave({
-            name: name.trim(),
-            tickers,
-            subGroups,
-        });
-    };
+    const draggedTickerValue =
+        draggedTicker !== null ? tickerValues.get(draggedTicker) || 0 : 0;
+    const tickerChipBaseClass =
+        "group relative inline-flex w-[124px] h-12 items-center rounded-lg border px-2.5 pr-7 text-left shadow-sm transition-all select-none cursor-grab active:cursor-grabbing bg-slate-700/90 border-slate-600 text-slate-100 hover:bg-slate-600 hover:border-slate-500";
+    const tickerChipDraggingClass = "opacity-70 scale-[0.97] ring-1 ring-blue-400/60";
 
     return (
-        <div className="space-y-4">
-            <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Group Name
-                </label>
-                <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g., Core Tech"
-                    className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-            </div>
+        <div className="relative overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-800/95 p-5 shadow-[0_18px_45px_rgba(2,6,23,0.35)] md:p-6 mb-8">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-slate-600/25 via-slate-700/10 to-transparent" />
+            <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-blue-500/10 blur-3xl" />
+            <div className="pointer-events-none absolute -left-20 bottom-0 h-44 w-44 rounded-full bg-cyan-500/5 blur-3xl" />
 
-            <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Tickers
-                </label>
-                <p className="text-xs text-slate-400 mb-2">
-                    Tick each position to this group. Tickers are kept unique
-                    across groups for clean comparisons.
-                </p>
+            <div className="relative mb-5 flex flex-col gap-4">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                    <div className="space-y-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-300/80">
+                            Ticker Categorization
+                        </p>
+                        <h2 className="text-xl font-semibold text-white md:text-2xl">
+                            Common Stock Category Analysis
+                        </h2>
+                        <p className="text-sm text-slate-300/80 max-w-3xl">
+                            Single-layer, Excel-style categorization for common stock holdings only. Drag ticker chips between rows to reassign.
+                        </p>
+                    </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row">
-                    <div className="flex-1">
-                        <div className="flex gap-2 mb-2">
+                    <div className="rounded-xl border border-slate-600/80 bg-slate-900/75 p-2 shadow-[inset_0_1px_0_rgba(148,163,184,0.08)]">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                             <input
-                                type="text"
-                                value={tickerInput}
-                                onChange={(e) => setTickerInput(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                        e.preventDefault();
-                                        handleAddManualTickers();
+                                value={newTickerInput}
+                                onChange={(event) => setNewTickerInput(event.target.value)}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        handleAddTicker();
                                     }
                                 }}
-                                placeholder="Search portfolio tickers or paste custom tickers"
-                                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                placeholder="Add ticker (e.g. SMCI)"
+                                className="w-full sm:w-72 px-3 py-2.5 bg-slate-700/90 border border-slate-600 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-blue-400"
                             />
                             <button
-                                onClick={handleAddManualTickers}
-                                className="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm"
+                                onClick={handleAddTicker}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 whitespace-nowrap"
                             >
+                                <Plus className="h-4 w-4" />
                                 Add
                             </button>
                         </div>
-
-                        {filteredTickers.length > 0 && (
-                            <div className="bg-slate-700/70 border border-slate-600 rounded-lg max-h-48 overflow-y-auto">
-                                {filteredTickers.map((ticker) => (
-                                    <button
-                                        key={ticker}
-                                        onClick={() => handleAddTicker(ticker)}
-                                        className="w-full text-left px-3 py-2 text-sm text-white hover:bg-slate-600 transition-colors"
-                                    >
-                                        {ticker}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex-shrink-0">
-                        <button
-                            type="button"
-                            onClick={handleAddRemainingAsOthers}
-                            className="px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg text-sm w-full"
-                        >
-                            Add Unassigned as Others
-                        </button>
                     </div>
                 </div>
-
-                {conflictingTickers.length > 0 && (
-                    <div className="mt-3 flex items-start gap-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 px-3 py-2 rounded-lg">
-                        <AlertTriangle className="h-4 w-4 mt-0.5" />
-                        These tickers are already in another group and will be
-                        moved here on save: {conflictingTickers.join(", ")}
-                    </div>
-                )}
-
-                {tickers.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-3">
-                        {tickers.map((ticker) => (
-                            <span
-                                key={ticker}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 bg-slate-600 text-white rounded text-sm"
-                            >
-                                {ticker}
-                                <button
-                                    onClick={() => handleRemoveTicker(ticker)}
-                                    className="hover:text-red-400 transition-colors"
-                                >
-                                    <X className="h-3 w-3" />
-                                </button>
-                            </span>
-                        ))}
-                    </div>
-                )}
             </div>
 
-            <button
-                type="button"
-                onClick={() => setShowAdvanced((prev) => !prev)}
-                className="text-xs text-slate-300 hover:text-white underline"
-            >
-                {showAdvanced ? "Hide" : "Show"} advanced sub-group mapping
-            </button>
-
-            {showAdvanced && tickers.length > 0 && (
-                <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                        Sub-group Mapping
-                    </label>
-                    <p className="text-xs text-slate-400 mb-2">
-                        Combine tickers under a shared label to see grouped
-                        tiles in the breakdown.
-                    </p>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                        {tickers.map((ticker) => (
-                            <div
-                                key={ticker}
-                                className="flex items-center gap-2 bg-slate-700 p-2 rounded"
-                            >
-                                <span className="text-white text-sm w-20 flex-shrink-0">
-                                    {ticker}:
-                                </span>
-                                <input
-                                    type="text"
-                                    value={subGroups[ticker] || ticker}
-                                    onChange={(e) =>
-                                        setSubGroups({
-                                            ...subGroups,
-                                            [ticker]:
-                                                e.target.value.trim() || ticker,
-                                        })
-                                    }
-                                    className="flex-1 px-2 py-1 bg-slate-600 border border-slate-500 rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                    placeholder={ticker}
-                                />
-                            </div>
-                        ))}
+            {draggedTicker && dragPointer && (
+                <div
+                    className="pointer-events-none fixed z-[60]"
+                    style={{
+                        left: dragPointer.x + 12,
+                        top: dragPointer.y + 12,
+                    }}
+                >
+                    <div className="inline-flex h-12 w-[124px] items-center rounded-lg border border-blue-400/80 bg-slate-600/95 px-2.5 text-left text-slate-50 shadow-xl">
+                        <span className="block w-full">
+                            <span className="block text-[13px] font-semibold leading-none tracking-wide">
+                                {draggedTicker}
+                            </span>
+                            <span className="mt-1 block text-[10px] leading-none text-slate-300">
+                                {formatCompactCurrency(draggedTickerValue)}
+                            </span>
+                        </span>
                     </div>
                 </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2">
-                <button
-                    onClick={onCancel}
-                    className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors text-sm"
-                >
-                    Cancel
-                </button>
-                <button
-                    onClick={handleSave}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm flex items-center gap-2"
-                >
-                    <Check className="h-4 w-4" />
-                    Save
-                </button>
+            <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/50 shadow-[inset_0_1px_0_rgba(148,163,184,0.08)]">
+                    <table className="min-w-full text-sm">
+                        <thead className="border-b border-slate-700 bg-slate-900/95 backdrop-blur">
+                        <tr>
+                            <th className="w-64 px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Category</th>
+                            <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Tickers (Drag & Drop)</th>
+                            <th className="w-44 px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Market Value</th>
+                            <th className="w-28 px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Portfolio %</th>
+                        </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-700/80">
+                        {unassignedTickers.length > 0 &&
+                            (() => {
+                                const stats = computeRowStats(unassignedTickers);
+
+                                return (
+                                    <tr
+                                        key={UNASSIGNED_ROW_ID}
+                                        data-drop-row-id={UNASSIGNED_ROW_ID}
+                                    className={`align-top ${
+                                        dragOverRowId === UNASSIGNED_ROW_ID
+                                            ? "bg-amber-500/12 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.45)]"
+                                            : "bg-slate-800/75 transition-colors hover:bg-slate-800/95"
+                                    }`}
+                                >
+                                    <td className="px-4 py-3.5">
+                                        <div className="font-semibold text-amber-200">Unassigned</div>
+                                        <div className="mt-1 text-xs text-slate-500">
+                                            Drop tickers here to remove category assignment
+                                        </div>
+                                    </td>
+                                        <td className="px-4 py-3.5">
+                                            <div className="min-h-12 flex flex-wrap gap-2.5">
+                                                {unassignedTickers.map((ticker) => {
+                                                    const hasPosition = tickerValues.has(ticker);
+                                                    const tickerValue = tickerValues.get(ticker) || 0;
+
+                                                    return (
+                                                        <button
+                                                            key={`unassigned_${ticker}`}
+                                                            onPointerDown={(event) =>
+                                                                handleChipPointerDown(
+                                                                    event,
+                                                                    ticker
+                                                                )
+                                                            }
+                                                            className={`${tickerChipBaseClass} ${
+                                                                draggedTicker === ticker
+                                                                    ? tickerChipDraggingClass
+                                                                    : ""
+                                                            }`}
+                                                            title={hasPosition ? "Ticker with position" : "Ticker without current position"}
+                                                        >
+                                                            <span className="block w-full">
+                                                                <span className="block text-[13px] font-semibold leading-none tracking-wide">
+                                                                    {ticker}
+                                                                </span>
+                                                                <span
+                                                                    className={`mt-1 block text-[10px] leading-none ${
+                                                                        hasPosition
+                                                                            ? "text-slate-400"
+                                                                            : "text-slate-500"
+                                                                    }`}
+                                                                >
+                                                                    {formatTickerRelativeText(
+                                                                        tickerValue,
+                                                                        stats.marketValue
+                                                                    )}
+                                                                </span>
+                                                            </span>
+                                                            {!hasPosition && (
+                                                                <span
+                                                                    onPointerDown={(event) => {
+                                                                        event.preventDefault();
+                                                                        event.stopPropagation();
+                                                                    }}
+                                                                    onClick={(event) => {
+                                                                        event.preventDefault();
+                                                                        event.stopPropagation();
+                                                                        removeManualTickerEverywhere(ticker);
+                                                                    }}
+                                                                    className="absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded text-slate-300 transition-colors hover:bg-slate-500/70 hover:text-white"
+                                                                    title="Remove ticker from workspace"
+                                                                >
+                                                                    <X className="w-3 h-3" />
+                                                                </span>
+                                                            )}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                    </td>
+                                    <td className="px-4 py-3.5 text-right font-mono text-base tracking-tight text-slate-200">{formatCurrency(stats.marketValue)}</td>
+                                    <td className="px-4 py-3.5 text-right font-mono text-base tracking-tight text-slate-300">{formatPercentageOfPortfolio(stats.percentageOfPortfolio)}</td>
+                                </tr>
+                            );
+                        })()}
+
+                        {sortedGroups.map((group) => {
+                            const rowTickers = sortTickersByPositionValue(group.tickers);
+                            const stats = computeRowStats(group.tickers);
+
+                            return (
+                                <tr
+                                    key={group.id}
+                                    data-drop-row-id={group.id}
+                                    className={`align-top ${
+                                        dragOverRowId === group.id
+                                            ? "bg-blue-500/10 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.45)]"
+                                            : "bg-slate-800/75 transition-colors hover:bg-slate-800/95"
+                                    }`}
+                                >
+                                    <td className="px-4 py-3.5">
+                                        {editingCategoryId === group.id ? (
+                                            <input
+                                                autoFocus
+                                                value={editingCategoryName}
+                                                onChange={(event) =>
+                                                    setEditingCategoryName(
+                                                        event.target.value
+                                                    )
+                                                }
+                                                onBlur={handleCommitInlineRename}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === "Enter") {
+                                                        event.preventDefault();
+                                                        handleCommitInlineRename();
+                                                    } else if (event.key === "Escape") {
+                                                        event.preventDefault();
+                                                        handleCancelInlineRename();
+                                                    }
+                                                }}
+                                                className="w-full rounded bg-slate-700 px-2.5 py-1.5 text-sm font-semibold text-white outline-none border border-blue-500/60 focus:ring-2 focus:ring-blue-500/70"
+                                            />
+                                        ) : (
+                                            <div className="break-words text-[18px] font-semibold text-white">
+                                                {group.name}
+                                            </div>
+                                        )}
+                                        <div className="mt-2.5 flex items-center gap-1.5">
+                                            <button
+                                                onClick={() =>
+                                                    handleStartInlineRename(group)
+                                                }
+                                                className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-blue-300"
+                                                title="Rename category"
+                                            >
+                                                <Pencil className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteCategory(group.id)}
+                                                className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-rose-300"
+                                                title="Delete category"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3.5">
+                                        <div className="min-h-12 flex flex-wrap gap-2.5">
+                                            {rowTickers.map((ticker) => {
+                                                const hasPosition = tickerValues.has(ticker);
+                                                const tickerValue = tickerValues.get(ticker) || 0;
+
+                                                return (
+                                                    <button
+                                                        key={`${group.id}_${ticker}`}
+                                                        onPointerDown={(event) =>
+                                                            handleChipPointerDown(
+                                                                event,
+                                                                ticker
+                                                            )
+                                                        }
+                                                        className={`${tickerChipBaseClass} ${
+                                                            draggedTicker === ticker
+                                                                ? tickerChipDraggingClass
+                                                                : ""
+                                                        }`}
+                                                    >
+                                                        <span className="block w-full">
+                                                            <span className="block text-[13px] font-semibold leading-none tracking-wide">
+                                                                {ticker}
+                                                            </span>
+                                                            <span
+                                                                className={`mt-1 block text-[10px] leading-none ${
+                                                                    hasPosition
+                                                                        ? "text-slate-400"
+                                                                        : "text-slate-500"
+                                                                }`}
+                                                            >
+                                                                {formatTickerRelativeText(
+                                                                    tickerValue,
+                                                                    stats.marketValue
+                                                                )}
+                                                            </span>
+                                                        </span>
+                                                        <span
+                                                            onPointerDown={(event) => {
+                                                                event.preventDefault();
+                                                                event.stopPropagation();
+                                                            }}
+                                                            onClick={(event) => {
+                                                                event.preventDefault();
+                                                                event.stopPropagation();
+                                                                moveTickerToRow(ticker, null);
+                                                            }}
+                                                            className="absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded text-slate-300 transition-colors hover:bg-slate-500/70 hover:text-white"
+                                                            title="Move to unassigned"
+                                                        >
+                                                            <X className="w-3 h-3" />
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                            {rowTickers.length === 0 && (
+                                                <span className="text-xs italic text-slate-500">No tickers in this category</span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3.5 text-right font-mono text-base tracking-tight text-slate-200">{formatCurrency(stats.marketValue)}</td>
+                                    <td className="px-4 py-3.5 text-right font-mono text-base tracking-tight text-slate-300">{formatPercentageOfPortfolio(stats.percentageOfPortfolio)}</td>
+                                </tr>
+                            );
+                        })}
+
+                        <tr className="align-top border-t border-slate-700 bg-slate-900/55">
+                            <td className="px-4 py-3.5">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleAddCategory}
+                                        className="inline-flex h-7 w-7 items-center justify-center rounded border border-slate-600 bg-slate-700 text-slate-200 transition-colors hover:border-blue-500 hover:bg-blue-600"
+                                        title="Add category"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                    </button>
+                                    <input
+                                        value={newCategoryName}
+                                        onChange={(event) =>
+                                            setNewCategoryName(event.target.value)
+                                        }
+                                        onKeyDown={(event) => {
+                                            if (event.key === "Enter") {
+                                                event.preventDefault();
+                                                handleAddCategory();
+                                            }
+                                        }}
+                                        placeholder="Add new category..."
+                                        className="w-full rounded border border-slate-600 bg-slate-700 px-2.5 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/70"
+                                    />
+                                </div>
+                            </td>
+                            <td
+                                colSpan={3}
+                                className="px-4 py-3.5 text-xs text-slate-500"
+                            >
+                                Press Enter or click + to create a new category row
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-full border border-slate-600 bg-slate-700/70 px-2.5 py-1 text-slate-300">
+                    Total tracked: {allKnownTickers.length}
+                </span>
+                <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-emerald-200">
+                    Assigned: {assignedTickers.size}
+                </span>
+                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+                    Unassigned: {unassignedTickers.length}
+                </span>
+                <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-blue-200">
+                    Portfolio total: {formatCurrency(portfolioTotal)}
+                </span>
             </div>
         </div>
     );
