@@ -1093,7 +1093,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
                                         rowRefs.current[group.id] = node;
                                     }}
                                     data-drop-row-id={group.id}
-                                    className={`align-top ${
+                                    className={`group align-top ${
                                         dragOverRowId === group.id
                                             ? "bg-blue-500/10 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.45)]"
                                             : "bg-slate-800/75 transition-colors hover:bg-slate-800/95"
@@ -1130,7 +1130,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
                                                 {group.name}
                                             </div>
                                         )}
-                                        <div className="mt-2.5 flex items-center gap-1.5">
+                                        <div className="mt-2.5 flex items-center gap-1.5 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto">
                                             <button
                                                 onClick={() =>
                                                     handleStartInlineRename(
