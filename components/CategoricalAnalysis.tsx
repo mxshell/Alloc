@@ -1,6 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import { PositionData, CategoricalGroup } from "../types";
-import { extractTicker, formatCurrency, formatPercentageOfPortfolio } from "../utils/dataParser";
+import {
+    extractTicker,
+    formatCurrency,
+    formatPercentageOfPortfolio,
+} from "../utils/dataParser";
 import { Plus, Trash2, Pencil, X } from "lucide-react";
 
 interface CategoricalAnalysisProps {
@@ -22,7 +32,7 @@ const ROW_REORDER_DELAY_MS = 700;
 const ROW_REORDER_TRANSITION_MS = 560;
 const ROW_REORDER_CLEANUP_MS = 620;
 const TICKER_CHIP_BASE_CLASS =
-    "group relative inline-flex w-[124px] h-12 items-center rounded-lg border px-2.5 pr-7 text-left shadow-sm transition-all select-none cursor-grab active:cursor-grabbing";
+    "group relative inline-flex w-[124px] h-12 items-center rounded-lg border px-2.5 pr-3 text-left shadow-sm transition-all select-none cursor-grab active:cursor-grabbing";
 const TICKER_CHIP_ACTIVE_CLASS =
     "bg-slate-700/90 border-slate-600 text-slate-100 hover:bg-slate-600 hover:border-slate-500";
 const TICKER_CHIP_INACTIVE_CLASS =
@@ -79,10 +89,10 @@ const formatCompactCurrency = (value: number) => {
 };
 
 const formatTickerRelativeText = (value: number, rowTotalValue: number) => {
-    const percentage =
+    const categoryPercentage =
         rowTotalValue > 0 ? (value / rowTotalValue) * 100 : 0;
-    return `${formatCompactCurrency(value)} · ${formatPercentageOfPortfolio(
-        percentage
+    return `${formatCompactCurrency(value)} · Cat. ${formatPercentageOfPortfolio(
+        categoryPercentage,
     )}`;
 };
 
@@ -137,7 +147,7 @@ const AirportBoardValue: React.FC<AirportBoardValueProps> = ({
         const tick = (now: number) => {
             const progress = Math.min(
                 (now - start) / AIRPORT_BOARD_ANIMATION_MS,
-                1
+                1,
             );
             setDisplayText(scrambleBoardText(targetText, progress));
 
@@ -159,7 +169,11 @@ const AirportBoardValue: React.FC<AirportBoardValueProps> = ({
 
     return (
         <span className={`${className} ${isAnimating ? "text-blue-100" : ""}`}>
-            <span className={isAnimating ? "inline-block animate-pulse" : "inline-block"}>
+            <span
+                className={
+                    isAnimating ? "inline-block animate-pulse" : "inline-block"
+                }
+            >
                 {displayText}
             </span>
         </span>
@@ -174,7 +188,7 @@ interface TickerChipProps {
     isDragging: boolean;
     onPointerDown: (
         event: React.PointerEvent<HTMLButtonElement>,
-        ticker: string
+        ticker: string,
     ) => void;
     onRemove?: (ticker: string) => void;
     removeTitle?: string;
@@ -196,9 +210,15 @@ const TickerChip: React.FC<TickerChipProps> = ({
         <button
             onPointerDown={(event) => onPointerDown(event, ticker)}
             className={`${TICKER_CHIP_BASE_CLASS} ${
-                isZeroPosition ? TICKER_CHIP_INACTIVE_CLASS : TICKER_CHIP_ACTIVE_CLASS
+                isZeroPosition
+                    ? TICKER_CHIP_INACTIVE_CLASS
+                    : TICKER_CHIP_ACTIVE_CLASS
             } ${isDragging ? TICKER_CHIP_DRAGGING_CLASS : ""}`}
-            title={hasPosition ? "Ticker with position" : "Ticker without current position"}
+            title={
+                hasPosition
+                    ? "Ticker with position"
+                    : "Ticker without current position"
+            }
         >
             <span className="block w-full">
                 <span className="block text-[13px] font-semibold leading-none tracking-wide">
@@ -208,6 +228,7 @@ const TickerChip: React.FC<TickerChipProps> = ({
                     className={`mt-1 block text-[10px] leading-none ${
                         hasPosition ? "text-slate-400" : "text-slate-500"
                     }`}
+                    title="Weight within this category"
                 >
                     {formatTickerRelativeText(tickerValue, rowMarketValue)}
                 </span>
@@ -223,7 +244,7 @@ const TickerChip: React.FC<TickerChipProps> = ({
                         event.stopPropagation();
                         onRemove(ticker);
                     }}
-                    className="absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded text-slate-300 transition-colors hover:bg-slate-500/70 hover:text-white"
+                    className="pointer-events-none absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded text-slate-300 opacity-0 transition-all hover:bg-slate-500/70 hover:text-white group-hover:pointer-events-auto group-hover:opacity-100 group-focus:pointer-events-auto group-focus:opacity-100"
                     title={removeTitle}
                 >
                     <X className="w-3 h-3" />
@@ -238,16 +259,18 @@ const sanitizeGroups = (input: unknown[]): CategoricalGroup[] => {
 
     return input
         .filter(
-            (entry): entry is { id?: unknown; name: string; tickers?: unknown[] } =>
+            (
+                entry,
+            ): entry is { id?: unknown; name: string; tickers?: unknown[] } =>
                 Boolean(entry) &&
                 typeof entry === "object" &&
-                typeof (entry as { name?: unknown }).name === "string"
+                typeof (entry as { name?: unknown }).name === "string",
         )
         .map((entry, index) => {
             const cleanTickers = uniqueTickers(
                 Array.isArray(entry.tickers)
                     ? entry.tickers.map((ticker) => String(ticker))
-                    : []
+                    : [],
             ).filter((ticker) => {
                 if (seen.has(ticker)) return false;
                 seen.add(ticker);
@@ -264,7 +287,9 @@ const sanitizeGroups = (input: unknown[]): CategoricalGroup[] => {
         .filter((group) => group.name.length > 0);
 };
 
-const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) => {
+const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
+    positions,
+}) => {
     const [groups, setGroups] = useState<CategoricalGroup[]>([]);
     const [manualTickers, setManualTickers] = useState<string[]>([]);
     const groupsRef = useRef<CategoricalGroup[]>([]);
@@ -274,8 +299,14 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
 
     const [draggedTicker, setDraggedTicker] = useState<string | null>(null);
     const [dragOverRowId, setDragOverRowId] = useState<string | null>(null);
-    const [dragPointer, setDragPointer] = useState<{ x: number; y: number } | null>(null);
-    const dragPointerOffsetRef = useRef<{ x: number; y: number }>({ x: 12, y: 12 });
+    const [dragPointer, setDragPointer] = useState<{
+        x: number;
+        y: number;
+    } | null>(null);
+    const dragPointerOffsetRef = useRef<{ x: number; y: number }>({
+        x: 12,
+        y: 12,
+    });
     const pointerDraggedTickerRef = useRef<string | null>(null);
     const pointerIdRef = useRef<number | null>(null);
     const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
@@ -285,8 +316,12 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
     const holdRowReorderRef = useRef(false);
     const valueAnimationTimerRef = useRef<number | null>(null);
     const [marketValueAnimateToken, setMarketValueAnimateToken] = useState(0);
-    const [marketValueFlashRowIds, setMarketValueFlashRowIds] = useState<string[]>([]);
-    const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+    const [marketValueFlashRowIds, setMarketValueFlashRowIds] = useState<
+        string[]
+    >([]);
+    const [editingCategoryId, setEditingCategoryId] = useState<string | null>(
+        null,
+    );
     const [editingCategoryName, setEditingCategoryName] = useState("");
 
     const [hasLoaded, setHasLoaded] = useState(false);
@@ -305,11 +340,15 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
         }
 
         try {
-            const storedManualTickers = localStorage.getItem(MANUAL_TICKER_STORAGE_KEY);
+            const storedManualTickers = localStorage.getItem(
+                MANUAL_TICKER_STORAGE_KEY,
+            );
             if (storedManualTickers) {
                 const parsed = JSON.parse(storedManualTickers);
                 if (Array.isArray(parsed)) {
-                    setManualTickers(uniqueTickers(parsed.map((entry) => String(entry))));
+                    setManualTickers(
+                        uniqueTickers(parsed.map((entry) => String(entry))),
+                    );
                 }
             }
         } catch (error) {
@@ -337,14 +376,17 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
         try {
             localStorage.setItem(
                 MANUAL_TICKER_STORAGE_KEY,
-                JSON.stringify(uniqueTickers(manualTickers))
+                JSON.stringify(uniqueTickers(manualTickers)),
             );
         } catch (error) {
             console.error("Failed to save manual ticker pool", error);
         }
     }, [manualTickers, hasLoaded]);
 
-    const tickerValues = useMemo(() => buildTickerValueMap(positions), [positions]);
+    const tickerValues = useMemo(
+        () => buildTickerValueMap(positions),
+        [positions],
+    );
 
     const portfolioTotal = useMemo(() => {
         let total = 0;
@@ -368,11 +410,14 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
         tickerValues.forEach((_value, ticker) => known.add(ticker));
         manualTickers.forEach((ticker) => known.add(normalizeTicker(ticker)));
         groups.forEach((group) => {
-            group.tickers.forEach((ticker) => known.add(normalizeTicker(ticker)));
+            group.tickers.forEach((ticker) =>
+                known.add(normalizeTicker(ticker)),
+            );
         });
 
         return Array.from(known).sort((a, b) => {
-            const valueDiff = (tickerValues.get(b) || 0) - (tickerValues.get(a) || 0);
+            const valueDiff =
+                (tickerValues.get(b) || 0) - (tickerValues.get(a) || 0);
             if (valueDiff !== 0) return valueDiff;
             return a.localeCompare(b);
         });
@@ -380,57 +425,62 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
 
     const unassignedTickers = useMemo(
         () => allKnownTickers.filter((ticker) => !assignedTickers.has(ticker)),
-        [allKnownTickers, assignedTickers]
+        [allKnownTickers, assignedTickers],
     );
 
     const sortTickersByPositionValue = useCallback(
         (tickers: string[]) =>
             uniqueTickers(tickers).sort((a, b) => {
-                const valueDiff = (tickerValues.get(b) || 0) - (tickerValues.get(a) || 0);
+                const valueDiff =
+                    (tickerValues.get(b) || 0) - (tickerValues.get(a) || 0);
                 if (valueDiff !== 0) return valueDiff;
                 return a.localeCompare(b);
             }),
-        [tickerValues]
+        [tickerValues],
     );
 
     const computeRowStats = useCallback(
         (tickers: string[]): CategoryRowStats => {
             const marketValue = tickers.reduce(
                 (sum, ticker) => sum + (tickerValues.get(ticker) || 0),
-                0
+                0,
             );
 
             return {
                 marketValue,
                 percentageOfPortfolio:
-                    portfolioTotal > 0 ? (marketValue / portfolioTotal) * 100 : 0,
+                    portfolioTotal > 0
+                        ? (marketValue / portfolioTotal) * 100
+                        : 0,
             };
         },
-        [portfolioTotal, tickerValues]
+        [portfolioTotal, tickerValues],
     );
 
     const getGroupMarketValue = useCallback(
         (group: CategoricalGroup) =>
             group.tickers.reduce(
-                (sum, ticker) => sum + (tickerValues.get(normalizeTicker(ticker)) || 0),
-                0
+                (sum, ticker) =>
+                    sum + (tickerValues.get(normalizeTicker(ticker)) || 0),
+                0,
             ),
-        [tickerValues]
+        [tickerValues],
     );
 
     const sortedGroups = useMemo(
         () =>
             [...groups].sort((a, b) => {
-                const valueDiff = getGroupMarketValue(b) - getGroupMarketValue(a);
+                const valueDiff =
+                    getGroupMarketValue(b) - getGroupMarketValue(a);
                 if (valueDiff !== 0) return valueDiff;
                 return a.name.localeCompare(b.name);
             }),
-        [getGroupMarketValue, groups]
+        [getGroupMarketValue, groups],
     );
 
     const sortedGroupIds = useMemo(
         () => sortedGroups.map((group) => group.id),
-        [sortedGroups]
+        [sortedGroups],
     );
 
     const groupsById = useMemo(() => {
@@ -442,7 +492,8 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
     const displayedGroups = useMemo(() => {
         const ordered: CategoricalGroup[] = [];
         const seen = new Set<string>();
-        const baseOrder = displayOrderIds.length > 0 ? displayOrderIds : sortedGroupIds;
+        const baseOrder =
+            displayOrderIds.length > 0 ? displayOrderIds : sortedGroupIds;
 
         baseOrder.forEach((id) => {
             const group = groupsById.get(id);
@@ -493,8 +544,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                     rowElement.style.willChange = "transform";
 
                     window.requestAnimationFrame(() => {
-                        rowElement.style.transition =
-                            `transform ${ROW_REORDER_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+                        rowElement.style.transition = `transform ${ROW_REORDER_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
                         rowElement.style.transform = "translateY(0)";
                     });
 
@@ -526,68 +576,80 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                 valueAnimationTimerRef.current = null;
             }, ROW_REORDER_DELAY_MS);
         },
-        [animateRowsToOrder]
+        [animateRowsToOrder],
     );
 
-    const moveTickerToRow = useCallback((tickerInput: string, targetGroupId: string | null) => {
-        const ticker = normalizeTicker(tickerInput);
-        if (!ticker) return;
+    const moveTickerToRow = useCallback(
+        (tickerInput: string, targetGroupId: string | null) => {
+            const ticker = normalizeTicker(tickerInput);
+            if (!ticker) return;
 
-        const sourceGroupId =
-            groupsRef.current.find((group) =>
-                group.tickers.some((entry) => normalizeTicker(entry) === ticker)
-            )?.id || null;
-        const didMove = sourceGroupId !== targetGroupId;
-        const affectedRowIds = Array.from(
-            new Set([
-                sourceGroupId || UNASSIGNED_ROW_ID,
-                targetGroupId || UNASSIGNED_ROW_ID,
-            ])
-        );
+            const sourceGroupId =
+                groupsRef.current.find((group) =>
+                    group.tickers.some(
+                        (entry) => normalizeTicker(entry) === ticker,
+                    ),
+                )?.id || null;
+            const didMove = sourceGroupId !== targetGroupId;
+            const affectedRowIds = Array.from(
+                new Set([
+                    sourceGroupId || UNASSIGNED_ROW_ID,
+                    targetGroupId || UNASSIGNED_ROW_ID,
+                ]),
+            );
 
-        setGroups((prev) => {
-            const withoutTicker = prev.map((group) => ({
-                ...group,
-                tickers: sortTickersByPositionValue(
-                    group.tickers.filter(
-                        (entry) => normalizeTicker(entry) !== ticker
-                    )
-                ),
-                subGroups: {},
-            }));
-
-            if (!targetGroupId) {
-                return withoutTicker;
-            }
-
-            return withoutTicker.map((group) => {
-                if (group.id !== targetGroupId) return group;
-                return {
+            setGroups((prev) => {
+                const withoutTicker = prev.map((group) => ({
                     ...group,
-                    tickers: sortTickersByPositionValue([...group.tickers, ticker]),
+                    tickers: sortTickersByPositionValue(
+                        group.tickers.filter(
+                            (entry) => normalizeTicker(entry) !== ticker,
+                        ),
+                    ),
                     subGroups: {},
-                };
+                }));
+
+                if (!targetGroupId) {
+                    return withoutTicker;
+                }
+
+                return withoutTicker.map((group) => {
+                    if (group.id !== targetGroupId) return group;
+                    return {
+                        ...group,
+                        tickers: sortTickersByPositionValue([
+                            ...group.tickers,
+                            ticker,
+                        ]),
+                        subGroups: {},
+                    };
+                });
             });
-        });
 
-        setManualTickers((prev) => uniqueTickers([...prev, ticker]));
+            setManualTickers((prev) => uniqueTickers([...prev, ticker]));
 
-        if (didMove) {
-            queueRelocationAnimation(affectedRowIds);
-        }
-    }, [queueRelocationAnimation, sortTickersByPositionValue]);
+            if (didMove) {
+                queueRelocationAnimation(affectedRowIds);
+            }
+        },
+        [queueRelocationAnimation, sortTickersByPositionValue],
+    );
 
     const removeManualTickerEverywhere = useCallback((tickerInput: string) => {
         const ticker = normalizeTicker(tickerInput);
         if (!ticker) return;
 
-        setManualTickers((prev) => prev.filter((entry) => normalizeTicker(entry) !== ticker));
+        setManualTickers((prev) =>
+            prev.filter((entry) => normalizeTicker(entry) !== ticker),
+        );
         setGroups((prev) =>
             prev.map((group) => ({
                 ...group,
-                tickers: group.tickers.filter((entry) => normalizeTicker(entry) !== ticker),
+                tickers: group.tickers.filter(
+                    (entry) => normalizeTicker(entry) !== ticker,
+                ),
                 subGroups: {},
-            }))
+            })),
         );
     }, []);
 
@@ -596,7 +658,10 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
         if (!name) return;
 
         const id = `category_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        setGroups((prev) => [...prev, { id, name, tickers: [], subGroups: {} }]);
+        setGroups((prev) => [
+            ...prev,
+            { id, name, tickers: [], subGroups: {} },
+        ]);
         setNewCategoryName("");
     };
 
@@ -620,8 +685,10 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
 
         setGroups((prev) =>
             prev.map((entry) =>
-                entry.id === editingCategoryId ? { ...entry, name: cleaned } : entry
-            )
+                entry.id === editingCategoryId
+                    ? { ...entry, name: cleaned }
+                    : entry,
+            ),
         );
         handleCancelInlineRename();
     };
@@ -670,7 +737,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
 
     const handleChipPointerDown = (
         event: React.PointerEvent<HTMLButtonElement>,
-        tickerInput: string
+        tickerInput: string,
     ) => {
         if (event.button !== 0) return;
         const ticker = normalizeTicker(tickerInput);
@@ -682,11 +749,11 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
         dragPointerOffsetRef.current = {
             x: Math.min(
                 Math.max(event.clientX - chipRect.left, 0),
-                chipRect.width || TICKER_CHIP_WIDTH
+                chipRect.width || TICKER_CHIP_WIDTH,
             ),
             y: Math.min(
                 Math.max(event.clientY - chipRect.top, 0),
-                chipRect.height || TICKER_CHIP_HEIGHT
+                chipRect.height || TICKER_CHIP_HEIGHT,
             ),
         };
 
@@ -730,7 +797,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
             if (rowId) {
                 moveTickerToRow(
                     pointerTicker,
-                    rowId === UNASSIGNED_ROW_ID ? null : rowId
+                    rowId === UNASSIGNED_ROW_ID ? null : rowId,
                 );
             }
 
@@ -774,7 +841,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
         sortedGroupIdsRef.current = sortedGroupIds;
         if (holdRowReorderRef.current) return;
         setDisplayOrderIds((prev) =>
-            areIdListsEqual(prev, sortedGroupIds) ? prev : sortedGroupIds
+            areIdListsEqual(prev, sortedGroupIds) ? prev : sortedGroupIds,
         );
     }, [sortedGroupIds]);
 
@@ -797,7 +864,9 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                 const sortedTickers = sortTickersByPositionValue(group.tickers);
                 const sameOrder =
                     sortedTickers.length === group.tickers.length &&
-                    sortedTickers.every((ticker, index) => ticker === group.tickers[index]);
+                    sortedTickers.every(
+                        (ticker, index) => ticker === group.tickers[index],
+                    );
 
                 if (sameOrder) return group;
 
@@ -825,7 +894,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
         draggedTicker !== null ? tickerValues.get(draggedTicker) || 0 : 0;
     const marketValueFlashSet = useMemo(
         () => new Set(marketValueFlashRowIds),
-        [marketValueFlashRowIds]
+        [marketValueFlashRowIds],
     );
 
     return (
@@ -837,14 +906,14 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
             <div className="relative mb-5 flex flex-col gap-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                     <div className="space-y-1">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-300/80">
+                        {/* <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-300/80">
                             Ticker Categorization
-                        </p>
+                        </p> */}
                         <h2 className="text-xl font-semibold text-white md:text-2xl">
-                            Common Stock Category Analysis
+                            Thematic Allocation
                         </h2>
                         <p className="text-sm text-slate-300/80 max-w-3xl">
-                            Single-layer, Excel-style categorization for common stock holdings only. Drag ticker chips between rows to reassign.
+                            View your portfolio breakdown by custom categories.
                         </p>
                     </div>
 
@@ -852,7 +921,9 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                             <input
                                 value={newTickerInput}
-                                onChange={(event) => setNewTickerInput(event.target.value)}
+                                onChange={(event) =>
+                                    setNewTickerInput(event.target.value)
+                                }
                                 onKeyDown={(event) => {
                                     if (event.key === "Enter") {
                                         event.preventDefault();
@@ -896,84 +967,123 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
             )}
 
             <div className="overflow-x-auto rounded-xl border border-slate-700/80 bg-slate-900/50 shadow-[inset_0_1px_0_rgba(148,163,184,0.08)]">
-                    <table className="min-w-full text-sm">
-                        <thead className="border-b border-slate-700 bg-slate-900/95 backdrop-blur">
+                <table className="min-w-full text-sm">
+                    <thead className="border-b border-slate-700 bg-slate-900/95 backdrop-blur">
                         <tr>
-                            <th className="w-64 px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Category</th>
-                            <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Tickers (Drag & Drop)</th>
-                            <th className="w-44 px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Market Value</th>
-                            <th className="w-28 px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Portfolio %</th>
+                            <th className="w-36 px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                                Category
+                            </th>
+                            <th className="w-36 px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                                Market Value
+                            </th>
+                            <th className="w-32 px-4 py-2.5 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                                Portfolio %
+                            </th>
+                            <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                                Tickers
+                            </th>
                         </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-700/80">
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/80">
                         {unassignedTickers.length > 0 &&
                             (() => {
-                                const stats = computeRowStats(unassignedTickers);
+                                const stats =
+                                    computeRowStats(unassignedTickers);
 
                                 return (
                                     <tr
                                         key={UNASSIGNED_ROW_ID}
                                         data-drop-row-id={UNASSIGNED_ROW_ID}
-                                    className={`align-top ${
-                                        dragOverRowId === UNASSIGNED_ROW_ID
-                                            ? "bg-amber-500/12 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.45)]"
-                                            : "bg-slate-800/75 transition-colors hover:bg-slate-800/95"
-                                    }`}
-                                >
-                                    <td className="px-4 py-3.5">
-                                        <div className="font-semibold text-amber-200">Unassigned</div>
-                                        <div className="mt-1 text-xs text-slate-500">
-                                            Drop tickers here to remove category assignment
-                                        </div>
-                                    </td>
+                                        className={`align-top ${
+                                            dragOverRowId === UNASSIGNED_ROW_ID
+                                                ? "bg-amber-500/12 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.45)]"
+                                                : "bg-slate-800/75 transition-colors hover:bg-slate-800/95"
+                                        }`}
+                                    >
+                                        <td className="px-4 py-3.5">
+                                            <div className="font-semibold text-amber-200">
+                                                Unassigned
+                                            </div>
+                                            {/* <div className="mt-1 text-xs text-slate-500">
+                                                Drop tickers here to remove
+                                                category assignment
+                                            </div> */}
+                                        </td>
+                                        <td className="px-4 py-3.5 text-right">
+                                            <AirportBoardValue
+                                                value={stats.marketValue}
+                                                formatter={formatCurrency}
+                                                animateToken={
+                                                    marketValueAnimateToken
+                                                }
+                                                shouldAnimate={marketValueFlashSet.has(
+                                                    UNASSIGNED_ROW_ID,
+                                                )}
+                                                className="font-mono text-base tracking-tight text-slate-200"
+                                            />
+                                        </td>
+                                        <td className="px-4 py-3.5 text-right font-mono text-base tracking-tight text-slate-300">
+                                            {formatPercentageOfPortfolio(
+                                                stats.percentageOfPortfolio,
+                                            )}
+                                        </td>
                                         <td className="px-4 py-3.5">
                                             <div className="min-h-12 flex flex-wrap gap-2.5">
-                                                {unassignedTickers.map((ticker) => {
-                                                    const hasPosition = tickerValues.has(ticker);
-                                                    const tickerValue = tickerValues.get(ticker) || 0;
+                                                {unassignedTickers.map(
+                                                    (ticker) => {
+                                                        const hasPosition =
+                                                            tickerValues.has(
+                                                                ticker,
+                                                            );
+                                                        const tickerValue =
+                                                            tickerValues.get(
+                                                                ticker,
+                                                            ) || 0;
 
-                                                    return (
-                                                        <TickerChip
-                                                            key={`unassigned_${ticker}`}
-                                                            ticker={ticker}
-                                                            tickerValue={tickerValue}
-                                                            hasPosition={hasPosition}
-                                                            rowMarketValue={stats.marketValue}
-                                                            isDragging={draggedTicker === ticker}
-                                                            onPointerDown={handleChipPointerDown}
-                                                            onRemove={
-                                                                hasPosition
-                                                                    ? undefined
-                                                                    : removeManualTickerEverywhere
-                                                            }
-                                                            removeTitle={
-                                                                hasPosition
-                                                                    ? undefined
-                                                                    : "Remove ticker from workspace"
-                                                            }
-                                                        />
-                                                    );
-                                                })}
+                                                        return (
+                                                            <TickerChip
+                                                                key={`unassigned_${ticker}`}
+                                                                ticker={ticker}
+                                                                tickerValue={
+                                                                    tickerValue
+                                                                }
+                                                                hasPosition={
+                                                                    hasPosition
+                                                                }
+                                                                rowMarketValue={
+                                                                    stats.marketValue
+                                                                }
+                                                                isDragging={
+                                                                    draggedTicker ===
+                                                                    ticker
+                                                                }
+                                                                onPointerDown={
+                                                                    handleChipPointerDown
+                                                                }
+                                                                onRemove={
+                                                                    hasPosition
+                                                                        ? undefined
+                                                                        : removeManualTickerEverywhere
+                                                                }
+                                                                removeTitle={
+                                                                    hasPosition
+                                                                        ? undefined
+                                                                        : "Remove ticker from workspace"
+                                                                }
+                                                            />
+                                                        );
+                                                    },
+                                                )}
                                             </div>
-                                    </td>
-                                    <td className="px-4 py-3.5 text-right">
-                                        <AirportBoardValue
-                                            value={stats.marketValue}
-                                            formatter={formatCurrency}
-                                            animateToken={marketValueAnimateToken}
-                                            shouldAnimate={marketValueFlashSet.has(
-                                                UNASSIGNED_ROW_ID
-                                            )}
-                                            className="font-mono text-base tracking-tight text-slate-200"
-                                        />
-                                    </td>
-                                    <td className="px-4 py-3.5 text-right font-mono text-base tracking-tight text-slate-300">{formatPercentageOfPortfolio(stats.percentageOfPortfolio)}</td>
-                                </tr>
-                            );
-                        })()}
+                                        </td>
+                                    </tr>
+                                );
+                            })()}
 
                         {displayedGroups.map((group) => {
-                            const rowTickers = sortTickersByPositionValue(group.tickers);
+                            const rowTickers = sortTickersByPositionValue(
+                                group.tickers,
+                            );
                             const stats = computeRowStats(group.tickers);
 
                             return (
@@ -989,22 +1099,26 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                                             : "bg-slate-800/75 transition-colors hover:bg-slate-800/95"
                                     }`}
                                 >
-                                    <td className="px-4 py-3.5">
+                                    <td className="pl-4 pr-1 py-3.5">
                                         {editingCategoryId === group.id ? (
                                             <input
                                                 autoFocus
                                                 value={editingCategoryName}
                                                 onChange={(event) =>
                                                     setEditingCategoryName(
-                                                        event.target.value
+                                                        event.target.value,
                                                     )
                                                 }
-                                                onBlur={handleCommitInlineRename}
+                                                onBlur={
+                                                    handleCommitInlineRename
+                                                }
                                                 onKeyDown={(event) => {
                                                     if (event.key === "Enter") {
                                                         event.preventDefault();
                                                         handleCommitInlineRename();
-                                                    } else if (event.key === "Escape") {
+                                                    } else if (
+                                                        event.key === "Escape"
+                                                    ) {
                                                         event.preventDefault();
                                                         handleCancelInlineRename();
                                                     }
@@ -1012,14 +1126,16 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                                                 className="w-full rounded bg-slate-700 px-2.5 py-1.5 text-sm font-semibold text-white outline-none border border-blue-500/60 focus:ring-2 focus:ring-blue-500/70"
                                             />
                                         ) : (
-                                            <div className="break-words text-[18px] font-semibold text-white">
+                                            <div className="break-words text-[16px] font-semibold text-white-300">
                                                 {group.name}
                                             </div>
                                         )}
                                         <div className="mt-2.5 flex items-center gap-1.5">
                                             <button
                                                 onClick={() =>
-                                                    handleStartInlineRename(group)
+                                                    handleStartInlineRename(
+                                                        group,
+                                                    )
                                                 }
                                                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-blue-300"
                                                 title="Rename category"
@@ -1027,7 +1143,11 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                                                 <Pencil className="w-3.5 h-3.5" />
                                             </button>
                                             <button
-                                                onClick={() => handleDeleteCategory(group.id)}
+                                                onClick={() =>
+                                                    handleDeleteCategory(
+                                                        group.id,
+                                                    )
+                                                }
                                                 className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-700 hover:text-rose-300"
                                                 title="Delete category"
                                             >
@@ -1035,49 +1155,78 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                                             </button>
                                         </div>
                                     </td>
+                                    <td className="px-3 py-3.5 text-right">
+                                        <AirportBoardValue
+                                            value={stats.marketValue}
+                                            formatter={formatCurrency}
+                                            animateToken={
+                                                marketValueAnimateToken
+                                            }
+                                            shouldAnimate={marketValueFlashSet.has(
+                                                group.id,
+                                            )}
+                                            className="font-mono text-base tracking-tight text-slate-200"
+                                        />
+                                    </td>
+                                    <td className="px-3 py-3.5 text-right font-mono text-base tracking-tight text-slate-300">
+                                        {formatPercentageOfPortfolio(
+                                            stats.percentageOfPortfolio,
+                                        )}
+                                    </td>
                                     <td className="px-4 py-3.5">
                                         <div className="min-h-12 flex flex-wrap gap-2.5">
                                             {rowTickers.map((ticker) => {
-                                                const hasPosition = tickerValues.has(ticker);
-                                                const tickerValue = tickerValues.get(ticker) || 0;
+                                                const hasPosition =
+                                                    tickerValues.has(ticker);
+                                                const tickerValue =
+                                                    tickerValues.get(ticker) ||
+                                                    0;
 
                                                 return (
                                                     <TickerChip
                                                         key={`${group.id}_${ticker}`}
                                                         ticker={ticker}
-                                                        tickerValue={tickerValue}
-                                                        hasPosition={hasPosition}
-                                                        rowMarketValue={stats.marketValue}
-                                                        isDragging={draggedTicker === ticker}
-                                                        onPointerDown={handleChipPointerDown}
-                                                        onRemove={(chipTicker) =>
-                                                            moveTickerToRow(chipTicker, null)
+                                                        tickerValue={
+                                                            tickerValue
+                                                        }
+                                                        hasPosition={
+                                                            hasPosition
+                                                        }
+                                                        rowMarketValue={
+                                                            stats.marketValue
+                                                        }
+                                                        isDragging={
+                                                            draggedTicker ===
+                                                            ticker
+                                                        }
+                                                        onPointerDown={
+                                                            handleChipPointerDown
+                                                        }
+                                                        onRemove={(
+                                                            chipTicker,
+                                                        ) =>
+                                                            moveTickerToRow(
+                                                                chipTicker,
+                                                                null,
+                                                            )
                                                         }
                                                         removeTitle="Move to unassigned"
                                                     />
                                                 );
                                             })}
                                             {rowTickers.length === 0 && (
-                                                <span className="text-xs italic text-slate-500">No tickers in this category</span>
+                                                <span className="text-xs italic text-slate-500">
+                                                    No tickers in this category
+                                                </span>
                                             )}
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3.5 text-right">
-                                        <AirportBoardValue
-                                            value={stats.marketValue}
-                                            formatter={formatCurrency}
-                                            animateToken={marketValueAnimateToken}
-                                            shouldAnimate={marketValueFlashSet.has(group.id)}
-                                            className="font-mono text-base tracking-tight text-slate-200"
-                                        />
-                                    </td>
-                                    <td className="px-4 py-3.5 text-right font-mono text-base tracking-tight text-slate-300">{formatPercentageOfPortfolio(stats.percentageOfPortfolio)}</td>
                                 </tr>
                             );
                         })}
 
                         <tr className="align-top border-t border-slate-700 bg-slate-900/55">
-                            <td className="px-4 py-3.5">
+                            <td className="px-3 py-3.5" colSpan={2}>
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={handleAddCategory}
@@ -1089,7 +1238,9 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                                     <input
                                         value={newCategoryName}
                                         onChange={(event) =>
-                                            setNewCategoryName(event.target.value)
+                                            setNewCategoryName(
+                                                event.target.value,
+                                            )
                                         }
                                         onKeyDown={(event) => {
                                             if (event.key === "Enter") {
@@ -1102,15 +1253,16 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({ positions }) 
                                     />
                                 </div>
                             </td>
-                            <td
-                                colSpan={3}
+                            {/* <td
+                                colSpan={2}
                                 className="px-4 py-3.5 text-xs text-slate-500"
                             >
-                                Press Enter or click + to create a new category row
-                            </td>
+                                Press Enter or click + to create a new category
+                                row
+                            </td> */}
                         </tr>
-                        </tbody>
-                    </table>
+                    </tbody>
+                </table>
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
