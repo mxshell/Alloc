@@ -6,11 +6,12 @@ import PositionsTable from "./components/PositionsTable";
 import PortfolioChart from "./components/PortfolioChart";
 import CategoricalAnalysis from "./components/CategoricalAnalysis";
 import FileDropZone from "./components/FileDropZone";
-import { LayoutDashboard, Trash2, Maximize2, Minimize2 } from "lucide-react";
+import { Trash2, Maximize2, Minimize2 } from "lucide-react";
 
 const APP_NAME = "Alloc";
 const STORAGE_KEY = `${APP_NAME}_json_data`;
 const FULL_WIDTH_STORAGE_KEY = `${APP_NAME}_full_width_preference`;
+const FAVICON_PATH = `${import.meta.env.BASE_URL}android-chrome-512x512.png`;
 
 const App: React.FC = () => {
     const [account, setAccount] = useState<AccountData | null>(null);
@@ -40,7 +41,7 @@ const App: React.FC = () => {
 
                 // Load full-width preference
                 const fullWidthPreference = localStorage.getItem(
-                    FULL_WIDTH_STORAGE_KEY
+                    FULL_WIDTH_STORAGE_KEY,
                 );
                 if (fullWidthPreference !== null) {
                     setIsFullWidth(fullWidthPreference === "true");
@@ -65,13 +66,13 @@ const App: React.FC = () => {
 
             if (!account) {
                 throw new Error(
-                    "Failed to parse account data. Please check the file format."
+                    "Failed to parse account data. Please check the file format.",
                 );
             }
 
             if (!positions || positions.length === 0) {
                 throw new Error(
-                    "Failed to parse positions data or file is empty. Please check the file format."
+                    "Failed to parse positions data or file is empty. Please check the file format.",
                 );
             }
 
@@ -133,11 +134,11 @@ const App: React.FC = () => {
     // Calculate some aggregate totals that might be missing or useful
     const totalDailyPL = positions.reduce(
         (acc, curr) => acc + curr.today_pl_val,
-        0
+        0,
     );
     const totalUnrealizedPL = positions.reduce(
         (acc, curr) => acc + curr.unrealized_pl,
-        0
+        0,
     );
 
     return (
@@ -151,7 +152,11 @@ const App: React.FC = () => {
                 >
                     <div className="flex justify-between h-16 items-center">
                         <div className="flex items-center gap-2">
-                            <LayoutDashboard className="h-6 w-6 text-blue-500" />
+                            <img
+                                src={FAVICON_PATH}
+                                alt="Alloc logo"
+                                className="h-7 w-7 rounded-sm"
+                            />
                             <span className="font-bold text-xl text-white tracking-tight">
                                 <span className="text-blue-500">Alloc</span>{" "}
                                 Dashboard

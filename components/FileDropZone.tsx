@@ -4,7 +4,6 @@ import {
     FileText,
     AlertCircle,
     CheckCircle2,
-    LayoutDashboard,
     Sparkles,
 } from "lucide-react";
 import { generateDemoData } from "../utils/demoDataGenerator";
@@ -14,6 +13,8 @@ interface FileDropZoneProps {
     onError: (error: string) => void;
     parseError?: string | null;
 }
+
+const FAVICON_PATH = `${import.meta.env.BASE_URL}android-chrome-512x512.png`;
 
 const FileDropZone: React.FC<FileDropZoneProps> = ({
     onFileLoaded,
@@ -83,7 +84,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
                     JSON.parse(jsonContent);
                 } catch (e) {
                     throw new Error(
-                        "Invalid JSON format. Please check the file."
+                        "Invalid JSON format. Please check the file.",
                     );
                 }
 
@@ -97,7 +98,7 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
                 setDataFile(null);
             }
         },
-        [onFileLoaded, onError]
+        [onFileLoaded, onError],
     );
 
     const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -119,14 +120,14 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
             setIsDragging(false);
             handleFiles(e.dataTransfer.files);
         },
-        [handleFiles]
+        [handleFiles],
     );
 
     const handleFileInput = useCallback(
         (e: React.ChangeEvent<HTMLInputElement>) => {
             handleFiles(e.target.files);
         },
-        [handleFiles]
+        [handleFiles],
     );
 
     const handleDemoMode = useCallback(() => {
@@ -149,8 +150,12 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
             <div className="w-full max-w-2xl">
                 <div className="text-center mb-8">
                     <div className="flex justify-center mb-4">
-                        <div className="p-4 bg-slate-800 rounded-full border border-slate-700">
-                            <LayoutDashboard className="h-12 w-12 text-blue-500" />
+                        <div className="p-4">
+                            <img
+                                src={FAVICON_PATH}
+                                alt="Alloc logo"
+                                className="h-16 w-16 rounded-md"
+                            />
                         </div>
                     </div>
                     <h1 className="text-3xl font-bold text-white mb-2">
