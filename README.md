@@ -14,7 +14,7 @@ Read the following section for step-by-step instructions.
 
 ### Prerequisites
 
--   You need to be a [FUTU/Moomoo](https://www.moomoo.com/) user with an active account, anywhere in the world (incl. US, HK, SG, etc.).
+- You need to be a [FUTU/Moomoo](https://www.moomoo.com/) user with an active account, anywhere in the world (incl. US, HK, SG, etc.).
 
 ### Step 1: Setup Moomoo API Client Locally
 
@@ -48,7 +48,7 @@ Read the following section for step-by-step instructions.
 3. Run the export script:
 
     ```bash
-    uv run moomoo_export.py
+    uv run main.py
     ```
 
     - After the script is done, you will find the exported data (a single JSON file) in the `python` directory.
@@ -58,8 +58,8 @@ Read the following section for step-by-step instructions.
 
 **Environment:**
 
--   `Node.js`
--   `pnpm` (optional, but recommended)
+- `Node.js`
+- `pnpm` (optional, but recommended)
 
 **Commands:**
 

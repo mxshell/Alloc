@@ -18,6 +18,8 @@ python moomoo_export.py
 ```
 """
 
+import json
+import logging
 import socket
 import time
 from datetime import datetime
@@ -25,17 +27,22 @@ from pathlib import Path
 
 import moomoo as ft
 import pandas as pd
-from moomoo.common.constant import (
-    Currency,
-    RET_OK,
-    SecurityFirm,
-    TrdMarket,
-)
-from rich import print
+from moomoo.common.constant import RET_OK, Currency, SecurityFirm, TrdMarket
 
-import json
+from console_output import blank_line, detail, error, info, success, warning
 
 THIS_DIR = Path(__file__).parent
+
+
+def configure_moomoo_console_logging(level: int = logging.WARNING) -> None:
+    logger = getattr(ft, "logger", None)
+    if logger is None:
+        return
+
+    try:
+        logger.console_level = level
+    except Exception:
+        pass
 
 
 def moomoo_is_running(
@@ -47,23 +54,26 @@ def moomoo_is_running(
     """
     Check if Moomoo OpenD is running, by checking if the port 11111 is open.
     """
-    for _ in range(int(timeout / retry_delay)):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(retry_delay)
-                s.connect((host, port))
-                return True
-        except socket.error:
-            pass
-        time.sleep(retry_delay)
+    timeout = max(timeout, 0.0)
+    retry_delay = max(retry_delay, 0.05)
+    socket_timeout = max(min(retry_delay, 1.0), 0.1)
+    deadline = time.monotonic() + timeout
 
-    return False
+    while True:
+        try:
+            with socket.create_connection((host, port), timeout=socket_timeout):
+                return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(min(retry_delay, max(deadline - time.monotonic(), 0.0)))
 
 
 def get_trade_context() -> ft.OpenSecTradeContext:
     if not moomoo_is_running():
-        print(
-            "[red bold]Moomoo OpenD is not running. Please run Moomoo OpenD locally at port 11111 and try again.[/red bold]"
+        error(
+            "OpenD",
+            "Moomoo OpenD is not running on 127.0.0.1:11111. Start it and try again.",
         )
         raise RuntimeError("Moomoo OpenD is not running.")
 
@@ -101,7 +111,7 @@ def get_accounts(trd_ctx: ft.OpenSecTradeContext):
         acc_ids = real_accounts["acc_id"].values.tolist()
         return acc_ids
     else:
-        print("get_acc_list error: ", data)
+        warning("Accounts", f"Unable to fetch trading accounts: {data}")
         return []
 
 
@@ -110,38 +120,50 @@ def export_account_data_for_web(
     acc_id: str = None,
     export_to_file: bool = True,
 ):
-    if acc_id is None:
-        acc_ids = get_accounts(trd_ctx=trd_ctx)
+    acc_ids = [acc_id] if acc_id is not None else get_accounts(trd_ctx=trd_ctx)
+    if not acc_ids:
+        warning("Accounts", "No real trading accounts found.")
+        return
 
     for acc_id in acc_ids:
-
-        positions_data = None
+        positions_data = pd.DataFrame()
         account_data = None
+        total_assets_value = 0.0
 
-        print(f"Querying account: '{acc_id}'")
+        blank_line()
+        info("Account", str(acc_id))
 
         ret, positions_data = trd_ctx.position_list_query(
             acc_id=acc_id, refresh_cache=True
         )
-        if ret == RET_OK and positions_data.shape[0] > 0:
+        if ret == RET_OK:
             positions_data: pd.DataFrame
             num_positions = positions_data.shape[0]
-            print(
-                f"  [green bold]➜ Success[/green bold] {num_positions} positions found."
+            detail("Positions", str(num_positions))
+        else:
+            warning(
+                "Positions",
+                f"Unable to query positions for account {acc_id}: {positions_data}",
             )
+            positions_data = pd.DataFrame()
+            detail("Positions", "unavailable")
 
         ret, account_data = trd_ctx.accinfo_query(
             acc_id=acc_id, currency=Currency.USD, refresh_cache=True
         )
         if ret == RET_OK and account_data.shape[0] > 0:
             account_data: pd.DataFrame
-            total_assets_value = account_data["total_assets"].values[0]
-            print(
-                f"  [green bold]➜ Total assets value:[/green bold] ${total_assets_value:.2f}"
+            total_assets_value = float(account_data["total_assets"].values[0] or 0.0)
+            detail("Assets", f"${total_assets_value:,.2f}")
+        else:
+            warning(
+                "Assets",
+                f"Unable to query account summary for account {acc_id}: {account_data}",
             )
+            continue
 
         if total_assets_value <= 0.1:
-            print(f"  [red bold]➜ Skip inactive account '{acc_id}'[/red bold]")
+            detail("Status", "inactive account, skipped")
             continue
 
         # convert data frame to dictionary
@@ -155,15 +177,17 @@ def export_account_data_for_web(
             out_path = THIS_DIR / f"account_{short_acc_id}_data_{timestamp}.json"
             with open(out_path, "w") as f:
                 json.dump(data, f, indent=4)
-            print(f"  [green bold]➜ Success[/green bold] Data exported to '{out_path}'")
+            detail("Exported", str(out_path))
+            detail("Status", "export complete")
 
 
 if __name__ == "__main__":
+    configure_moomoo_console_logging()
     trd_ctx = None
     try:
-        print(f"Acquiring trade context from Moomoo OpenD...")
+        info("Trade Context", "Opening connection to Moomoo OpenD")
         trd_ctx = get_trade_context()
-        print(f"Trade context acquired.")
+        success("Trade Context", "Connection established")
 
         export_account_data_for_web(trd_ctx=trd_ctx)
     except Exception as e:
@@ -171,4 +195,4 @@ if __name__ == "__main__":
     finally:
         if trd_ctx is not None:
             trd_ctx.close()
-            print("Trade Context has been closed.")
+            info("Trade Context", "Closed")
