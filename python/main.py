@@ -261,8 +261,10 @@ def main():
         ensure_moomoo_opend_ready(launch_state)
 
         info("Trade Context", "Opening connection to Moomoo OpenD")
+        time.sleep(2)
         trd_ctx = get_trade_context()
         success("Trade Context", "Connection established")
+        time.sleep(2)
 
         launch_state.export_started = True
         export_account_data_for_web(trd_ctx=trd_ctx)
