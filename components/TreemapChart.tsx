@@ -44,16 +44,16 @@ interface TreemapContentProps {
 }
 
 const CHART_COLORS = [
-    "#0f766e",
-    "#2563eb",
-    "#7c3aed",
-    "#ca8a04",
-    "#db2777",
-    "#059669",
-    "#0284c7",
-    "#9333ea",
-    "#d97706",
-    "#64748b",
+    "#012a4a",
+    "#013a63",
+    "#01497c",
+    "#014f86",
+    "#2a6f97",
+    "#2c7da0",
+    "#468faf",
+    "#61a5c2",
+    "#89c2d9",
+    "#a9d6e5",
 ];
 
 const LABEL_FONT_SIZE = 14;
