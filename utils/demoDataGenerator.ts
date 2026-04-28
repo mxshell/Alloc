@@ -1,4 +1,5 @@
 import { AccountData, PositionData } from '../types';
+import { applyPortfolioTotals, withPortfolioPercentages } from './portfolio';
 
 // Sample stock names and codes for realistic demo data
 const SAMPLE_STOCKS = [
@@ -187,37 +188,13 @@ export const generateDemoPositionsData = (accountData: AccountData): PositionDat
  */
 export const generateDemoData = (): string => {
   const account = generateDemoAccountData();
-  const positions = generateDemoPositionsData(account);
-  
-  // Calculate portfolio percentages
-  const totalAssets = account.total_assets;
-  positions.forEach(position => {
-    position.percentage_of_portfolio = (position.market_val / totalAssets) * 100;
-  });
-  
-  // Calculate PL totals
-  const normalizeCodeForOptionCheck = (code: string) =>
-    code.includes('.') ? code.split('.')[1] : code;
-  const isOption = (code: string) =>
-    /^[A-Z]+[0-9]{6}[CP][0-9]+$/i.test(normalizeCodeForOptionCheck(code));
-  const totalUnrealizedPlOptions = positions
-    .filter(position => isOption(position.code))
-    .reduce((acc, position) => acc + position.unrealized_pl, 0);
-  const totalUnrealizedPlStocks = positions
-    .filter(position => !isOption(position.code))
-    .reduce((acc, position) => acc + position.unrealized_pl, 0);
-  const totalRealizedPlStocks = positions
-    .filter(position => !isOption(position.code))
-    .reduce((acc, position) => acc + position.realized_pl, 0);
-  const totalPlPotential = totalUnrealizedPlOptions + totalUnrealizedPlStocks + totalRealizedPlStocks;
-  
-  account.total_pl_potential = totalPlPotential;
-  account.total_pl_unrealized_options = totalUnrealizedPlOptions;
-  account.total_pl_unrealized_stocks = totalUnrealizedPlStocks;
-  account.total_pl_realized_stocks = totalRealizedPlStocks;
+  const positions = withPortfolioPercentages(
+    generateDemoPositionsData(account),
+    account.total_assets,
+  );
   
   return JSON.stringify({
-    account,
+    account: applyPortfolioTotals(account, positions),
     positions,
   }, null, 2);
 };

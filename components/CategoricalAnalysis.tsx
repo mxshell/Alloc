@@ -5,287 +5,37 @@ import React, {
     useRef,
     useState,
 } from "react";
-import { PositionData, CategoricalGroup } from "../types";
+import type { PositionData, CategoricalGroup } from "../types";
 import {
-    extractTicker,
+    formatCompactCurrency,
     formatCurrency,
     formatPercentageOfPortfolio,
-} from "../utils/dataParser";
-import { Plus, Trash2, Pencil, X } from "lucide-react";
+} from "../utils/formatters";
+import { normalizeTicker } from "../utils/portfolio";
+import {
+    areIdListsEqual,
+    buildTickerValueMap,
+    sanitizeGroups,
+    uniqueTickers,
+} from "../utils/categorical";
+import type { CategoryRowStats } from "../utils/categorical";
+import AirportBoardValue from "./categorical/AirportBoardValue";
+import TickerChip, {
+    TICKER_CHIP_HEIGHT,
+    TICKER_CHIP_WIDTH,
+} from "./categorical/TickerChip";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 
 interface CategoricalAnalysisProps {
     positions: PositionData[];
 }
 
-interface CategoryRowStats {
-    marketValue: number;
-    percentageOfPortfolio: number;
-}
-
 const STORAGE_KEY = "Alloc_categorical_groups";
 const MANUAL_TICKER_STORAGE_KEY = "Alloc_categorical_manual_tickers";
 const UNASSIGNED_ROW_ID = "__unassigned__";
-const TICKER_CHIP_WIDTH = 124;
-const TICKER_CHIP_HEIGHT = 48;
-const AIRPORT_BOARD_ANIMATION_MS = 680;
 const ROW_REORDER_DELAY_MS = 700;
 const ROW_REORDER_TRANSITION_MS = 560;
 const ROW_REORDER_CLEANUP_MS = 620;
-const TICKER_CHIP_BASE_CLASS =
-    "group relative inline-flex w-[124px] h-12 items-center rounded-lg border px-2.5 pr-3 text-left shadow-sm transition-all select-none cursor-grab active:cursor-grabbing";
-const TICKER_CHIP_ACTIVE_CLASS =
-    "bg-slate-700/90 border-slate-600 text-slate-100 hover:bg-slate-600 hover:border-slate-500";
-const TICKER_CHIP_INACTIVE_CLASS =
-    "bg-slate-800/65 border-slate-700/70 text-slate-400 hover:bg-slate-800/85 hover:border-slate-600/80";
-const TICKER_CHIP_DRAGGING_CLASS = "opacity-20";
-
-const normalizeTicker = (ticker: string) => ticker.toUpperCase().trim();
-const normalizeCodeForOptionCheck = (code: string) =>
-    code.includes(".") ? code.split(".")[1] : code;
-const isOptionCode = (code: string) =>
-    /^[A-Z]+[0-9]{6}[CP][0-9]+$/i.test(normalizeCodeForOptionCheck(code));
-
-const uniqueTickers = (tickers: string[]) => {
-    const seen = new Set<string>();
-    const result: string[] = [];
-
-    tickers.forEach((ticker) => {
-        const normalized = normalizeTicker(ticker);
-        if (!normalized || seen.has(normalized)) return;
-        seen.add(normalized);
-        result.push(normalized);
-    });
-
-    return result;
-};
-
-const buildTickerValueMap = (positions: PositionData[]) => {
-    const map = new Map<string, number>();
-
-    positions.forEach((position) => {
-        if (isOptionCode(position.code)) return;
-
-        const ticker = normalizeTicker(extractTicker(position.code));
-        if (!ticker) return;
-
-        const value = Math.abs(position.market_val);
-        if (Number.isNaN(value)) return;
-
-        map.set(ticker, (map.get(ticker) || 0) + value);
-    });
-
-    return map;
-};
-
-const formatCompactCurrency = (value: number) => {
-    if (!Number.isFinite(value) || value === 0) return "$0";
-
-    return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        notation: "compact",
-        maximumFractionDigits: 1,
-    }).format(value);
-};
-
-const formatTickerRelativeText = (value: number, rowTotalValue: number) => {
-    const categoryPercentage =
-        rowTotalValue > 0 ? (value / rowTotalValue) * 100 : 0;
-    return `${formatCompactCurrency(value)} · Cat. ${formatPercentageOfPortfolio(
-        categoryPercentage,
-    )}`;
-};
-
-const areIdListsEqual = (a: string[], b: string[]) =>
-    a.length === b.length && a.every((id, index) => id === b[index]);
-
-const scrambleBoardText = (target: string, progress: number) => {
-    const normalizedProgress = Math.min(Math.max(progress, 0), 1);
-    const lockCount = Math.floor(target.length * normalizedProgress);
-
-    return target
-        .split("")
-        .map((char, index) => {
-            const shouldLock = index < lockCount || !/[0-9]/.test(char);
-            if (shouldLock) return char;
-            return String(Math.floor(Math.random() * 10));
-        })
-        .join("");
-};
-
-interface AirportBoardValueProps {
-    value: number;
-    formatter: (value: number) => string;
-    animateToken: number;
-    shouldAnimate: boolean;
-    className: string;
-}
-
-const AirportBoardValue: React.FC<AirportBoardValueProps> = ({
-    value,
-    formatter,
-    animateToken,
-    shouldAnimate,
-    className,
-}) => {
-    const targetText = formatter(value);
-    const [displayText, setDisplayText] = useState(targetText);
-    const [isAnimating, setIsAnimating] = useState(false);
-
-    useEffect(() => {
-        if (!shouldAnimate) {
-            setDisplayText(targetText);
-            setIsAnimating(false);
-            return;
-        }
-
-        const start = performance.now();
-        let frameId = 0;
-
-        setIsAnimating(true);
-
-        const tick = (now: number) => {
-            const progress = Math.min(
-                (now - start) / AIRPORT_BOARD_ANIMATION_MS,
-                1,
-            );
-            setDisplayText(scrambleBoardText(targetText, progress));
-
-            if (progress < 1) {
-                frameId = window.requestAnimationFrame(tick);
-                return;
-            }
-
-            setDisplayText(targetText);
-            setIsAnimating(false);
-        };
-
-        frameId = window.requestAnimationFrame(tick);
-
-        return () => {
-            window.cancelAnimationFrame(frameId);
-        };
-    }, [animateToken, shouldAnimate, targetText]);
-
-    return (
-        <span className={`${className} ${isAnimating ? "text-blue-100" : ""}`}>
-            <span
-                className={
-                    isAnimating ? "inline-block animate-pulse" : "inline-block"
-                }
-            >
-                {displayText}
-            </span>
-        </span>
-    );
-};
-
-interface TickerChipProps {
-    ticker: string;
-    tickerValue: number;
-    hasPosition: boolean;
-    rowMarketValue: number;
-    isDragging: boolean;
-    onPointerDown: (
-        event: React.PointerEvent<HTMLButtonElement>,
-        ticker: string,
-    ) => void;
-    onRemove?: (ticker: string) => void;
-    removeTitle?: string;
-}
-
-const TickerChip: React.FC<TickerChipProps> = ({
-    ticker,
-    tickerValue,
-    hasPosition,
-    rowMarketValue,
-    isDragging,
-    onPointerDown,
-    onRemove,
-    removeTitle,
-}) => {
-    const isZeroPosition = tickerValue <= 0;
-
-    return (
-        <button
-            onPointerDown={(event) => onPointerDown(event, ticker)}
-            className={`${TICKER_CHIP_BASE_CLASS} ${
-                isZeroPosition
-                    ? TICKER_CHIP_INACTIVE_CLASS
-                    : TICKER_CHIP_ACTIVE_CLASS
-            } ${isDragging ? TICKER_CHIP_DRAGGING_CLASS : ""}`}
-            title={
-                hasPosition
-                    ? "Ticker with position"
-                    : "Ticker without current position"
-            }
-        >
-            <span className="block w-full">
-                <span className="block text-[13px] font-semibold leading-none tracking-wide">
-                    {ticker}
-                </span>
-                <span
-                    className={`mt-1 block text-[10px] leading-none ${
-                        hasPosition ? "text-slate-400" : "text-slate-500"
-                    }`}
-                    title="Weight within this category"
-                >
-                    {formatTickerRelativeText(tickerValue, rowMarketValue)}
-                </span>
-            </span>
-            {onRemove && (
-                <span
-                    onPointerDown={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onRemove(ticker);
-                    }}
-                    className="pointer-events-none absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center rounded text-slate-300 opacity-0 transition-all hover:bg-slate-500/70 hover:text-white group-hover:pointer-events-auto group-hover:opacity-100 group-focus:pointer-events-auto group-focus:opacity-100"
-                    title={removeTitle}
-                >
-                    <X className="w-3 h-3" />
-                </span>
-            )}
-        </button>
-    );
-};
-
-const sanitizeGroups = (input: unknown[]): CategoricalGroup[] => {
-    const seen = new Set<string>();
-
-    return input
-        .filter(
-            (
-                entry,
-            ): entry is { id?: unknown; name: string; tickers?: unknown[] } =>
-                Boolean(entry) &&
-                typeof entry === "object" &&
-                typeof (entry as { name?: unknown }).name === "string",
-        )
-        .map((entry, index) => {
-            const cleanTickers = uniqueTickers(
-                Array.isArray(entry.tickers)
-                    ? entry.tickers.map((ticker) => String(ticker))
-                    : [],
-            ).filter((ticker) => {
-                if (seen.has(ticker)) return false;
-                seen.add(ticker);
-                return true;
-            });
-
-            return {
-                id: String(entry.id || `category_${Date.now()}_${index}`),
-                name: String(entry.name || `Category ${index + 1}`).trim(),
-                tickers: cleanTickers,
-                subGroups: {},
-            } as CategoricalGroup;
-        })
-        .filter((group) => group.name.length > 0);
-};
 
 const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
     positions,
@@ -606,7 +356,6 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
                             (entry) => normalizeTicker(entry) !== ticker,
                         ),
                     ),
-                    subGroups: {},
                 }));
 
                 if (!targetGroupId) {
@@ -621,7 +370,6 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
                             ...group.tickers,
                             ticker,
                         ]),
-                        subGroups: {},
                     };
                 });
             });
@@ -648,7 +396,6 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
                 tickers: group.tickers.filter(
                     (entry) => normalizeTicker(entry) !== ticker,
                 ),
-                subGroups: {},
             })),
         );
     }, []);
@@ -660,7 +407,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
         const id = `category_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         setGroups((prev) => [
             ...prev,
-            { id, name, tickers: [], subGroups: {} },
+            { id, name, tickers: [] },
         ]);
         setNewCategoryName("");
     };
@@ -874,7 +621,6 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
                 return {
                     ...group,
                     tickers: sortedTickers,
-                    subGroups: {},
                 };
             });
 
@@ -898,11 +644,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
     );
 
     return (
-        <div className="relative overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-800/95 p-5 shadow-[0_18px_45px_rgba(2,6,23,0.35)] md:p-6 mb-8">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-slate-600/25 via-slate-700/10 to-transparent" />
-            <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-blue-500/10 blur-3xl" />
-            <div className="pointer-events-none absolute -left-20 bottom-0 h-44 w-44 rounded-full bg-cyan-500/5 blur-3xl" />
-
+        <div className="relative mb-8 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 p-5 shadow-sm md:p-6">
             <div className="relative mb-5 flex flex-col gap-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                     <div className="space-y-1">
@@ -1126,7 +868,7 @@ const CategoricalAnalysis: React.FC<CategoricalAnalysisProps> = ({
                                                 className="w-full rounded bg-slate-700 px-2.5 py-1.5 text-sm font-semibold text-white outline-none border border-blue-500/60 focus:ring-2 focus:ring-blue-500/70"
                                             />
                                         ) : (
-                                            <div className="break-words text-[16px] font-semibold text-white-300">
+                                            <div className="break-words text-[16px] font-semibold text-white">
                                                 {group.name}
                                             </div>
                                         )}

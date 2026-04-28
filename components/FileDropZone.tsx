@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useId, useState } from "react";
 import {
     Upload,
     FileText,
@@ -16,83 +16,76 @@ interface FileDropZoneProps {
 
 const FAVICON_PATH = `${import.meta.env.BASE_URL}android-chrome-512x512.png`;
 
+const readFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            resolve(String(event.target?.result ?? ""));
+        };
+        reader.onerror = () =>
+            reject(new Error(`Failed to read file: ${file.name}`));
+
+        reader.readAsText(file);
+    });
+};
+
+const getSingleJsonFile = (files: FileList | null) => {
+    if (!files || files.length === 0) return null;
+
+    if (files.length > 1) {
+        throw new Error("Please provide a single JSON file");
+    }
+
+    const file = files[0];
+    if (!file.name.toLowerCase().endsWith(".json")) {
+        throw new Error("Please provide a JSON file (should end with .json)");
+    }
+
+    return file;
+};
+
 const FileDropZone: React.FC<FileDropZoneProps> = ({
     onFileLoaded,
     onError,
     parseError,
 }) => {
+    const fileInputId = useId();
     const [isDragging, setIsDragging] = useState(false);
     const [dataFile, setDataFile] = useState<File | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    // Use parseError from props if available, otherwise use local error state
     const displayError = parseError || error;
-
-    const readFile = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const content = e.target?.result as string;
-                resolve(content);
-            };
-            reader.onerror = () =>
-                reject(new Error(`Failed to read file: ${file.name}`));
-            reader.readAsText(file);
-        });
-    };
 
     const handleFiles = useCallback(
         async (files: FileList | null) => {
-            if (!files || files.length === 0) return;
-
-            // Clear any previous errors
             setError(null);
 
-            // Expect a single JSON file
-            if (files.length > 1) {
-                const errorMsg = "Please provide a single JSON file";
-                setError(errorMsg);
-                onError(errorMsg);
-                return;
-            }
-
-            const file = files[0];
-            const fileName = file.name.toLowerCase();
-
-            // Validate file is JSON
-            if (!fileName.endsWith(".json")) {
-                const errorMsg =
-                    "Please provide a JSON file (should end with .json)";
-                setError(errorMsg);
-                onError(errorMsg);
-                return;
-            }
-
-            setDataFile(file);
-
             try {
-                // Read the JSON file
+                const file = getSingleJsonFile(files);
+                if (!file) return;
+
+                setDataFile(file);
                 const jsonContent = await readFile(file);
 
-                // Validate file is not empty
                 if (!jsonContent.trim()) {
                     throw new Error("JSON file is empty");
                 }
 
-                // Validate it's valid JSON
                 try {
                     JSON.parse(jsonContent);
-                } catch (e) {
+                } catch {
                     throw new Error(
                         "Invalid JSON format. Please check the file.",
                     );
                 }
 
-                // Pass to parent for parsing
                 onFileLoaded(jsonContent);
-            } catch (err) {
+            } catch (error) {
                 const errorMsg =
-                    err instanceof Error ? err.message : "Failed to read file";
+                    error instanceof Error
+                        ? error.message
+                        : "Failed to read file";
                 setError(errorMsg);
                 onError(errorMsg);
                 setDataFile(null);
@@ -126,12 +119,14 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
     const handleFileInput = useCallback(
         (e: React.ChangeEvent<HTMLInputElement>) => {
             handleFiles(e.target.files);
+            e.target.value = "";
         },
         [handleFiles],
     );
 
     const handleDemoMode = useCallback(() => {
         setError(null);
+        setDataFile(null);
         try {
             const demoData = generateDemoData();
             onFileLoaded(demoData);
@@ -197,13 +192,13 @@ const FileDropZone: React.FC<FileDropZoneProps> = ({
                     <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
                         <input
                             type="file"
-                            id="file-input"
+                            id={fileInputId}
                             accept=".json"
                             onChange={handleFileInput}
                             className="hidden"
                         />
                         <label
-                            htmlFor="file-input"
+                            htmlFor={fileInputId}
                             className="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg cursor-pointer transition-colors"
                         >
                             Select File

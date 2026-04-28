@@ -68,7 +68,6 @@ export interface CategoricalGroup {
   id: string;
   name: string;
   tickers: string[];
-  subGroups: Record<string, string>; // Maps ticker to sub-group name
 }
 
 export interface SubGroupData {

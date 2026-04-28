@@ -1,171 +1,166 @@
-import React, { useState, useEffect } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Maximize2, Minimize2, Trash2 } from "lucide-react";
 import { parseJSONData } from "./utils/dataParser";
 import { AccountData, PositionData } from "./types";
 import SummaryCard from "./components/SummaryCard";
-import PositionsTable from "./components/PositionsTable";
-import PortfolioChart from "./components/PortfolioChart";
-import CategoricalAnalysis from "./components/CategoricalAnalysis";
 import FileDropZone from "./components/FileDropZone";
-import { Trash2, Maximize2, Minimize2 } from "lucide-react";
+
+const PortfolioChart = lazy(() => import("./components/PortfolioChart"));
+const PositionsTable = lazy(() => import("./components/PositionsTable"));
+const CategoricalAnalysis = lazy(
+    () => import("./components/CategoricalAnalysis"),
+);
 
 const APP_NAME = "Alloc";
 const STORAGE_KEY = `${APP_NAME}_json_data`;
 const FULL_WIDTH_STORAGE_KEY = `${APP_NAME}_full_width_preference`;
 const FAVICON_PATH = `${import.meta.env.BASE_URL}android-chrome-512x512.png`;
 
+interface ParsedPortfolioData {
+    account: AccountData;
+    positions: PositionData[];
+}
+
+const parsePortfolioData = (jsonContent: string): ParsedPortfolioData => {
+    const { account, positions } = parseJSONData(jsonContent);
+
+    if (!account) {
+        throw new Error(
+            "Failed to parse account data. Please check the file format.",
+        );
+    }
+
+    if (positions.length === 0) {
+        throw new Error(
+            "Failed to parse positions data or file is empty. Please check the file format.",
+        );
+    }
+
+    return { account, positions };
+};
+
+const DashboardFallback = () => (
+    <div className="rounded-xl border border-slate-700 bg-slate-800 p-8 text-center text-sm text-slate-400">
+        Loading dashboard sections...
+    </div>
+);
+
+const LoadingScreen = () => (
+    <div className="flex min-h-screen items-center justify-center bg-slate-900">
+        <div className="animate-pulse text-xl font-semibold text-blue-500">
+            Loading portfolio data...
+        </div>
+    </div>
+);
+
 const App: React.FC = () => {
     const [account, setAccount] = useState<AccountData | null>(null);
     const [positions, setPositions] = useState<PositionData[]>([]);
     const [parseError, setParseError] = useState<string | null>(null);
     const [isLoadingFromStorage, setIsLoadingFromStorage] = useState(true);
-    const [isFullWidth, setIsFullWidth] = useState<boolean>(false);
+    const [isFullWidth, setIsFullWidth] = useState(false);
 
-    // Load data from localStorage on mount
     useEffect(() => {
-        const loadFromStorage = () => {
-            try {
-                const storedJSON = localStorage.getItem(STORAGE_KEY);
-
-                if (storedJSON) {
-                    // Try to parse the stored JSON data
-                    const { account, positions } = parseJSONData(storedJSON);
-
-                    if (account && positions && positions.length > 0) {
-                        setAccount(account);
-                        setPositions(positions);
-                    } else {
-                        // Stored data is invalid, clear it
-                        localStorage.removeItem(STORAGE_KEY);
-                    }
+        try {
+            const storedJSON = localStorage.getItem(STORAGE_KEY);
+            if (storedJSON) {
+                try {
+                    const parsed = parsePortfolioData(storedJSON);
+                    setAccount(parsed.account);
+                    setPositions(parsed.positions);
+                } catch (error) {
+                    console.error("Stored portfolio data is invalid", error);
+                    localStorage.removeItem(STORAGE_KEY);
                 }
-
-                // Load full-width preference
-                const fullWidthPreference = localStorage.getItem(
-                    FULL_WIDTH_STORAGE_KEY,
-                );
-                if (fullWidthPreference !== null) {
-                    setIsFullWidth(fullWidthPreference === "true");
-                }
-            } catch (e) {
-                console.error("Failed to load data from localStorage", e);
-                // Clear corrupted data
-                localStorage.removeItem(STORAGE_KEY);
-            } finally {
-                setIsLoadingFromStorage(false);
             }
-        };
 
-        loadFromStorage();
+            const fullWidthPreference = localStorage.getItem(
+                FULL_WIDTH_STORAGE_KEY,
+            );
+            if (fullWidthPreference !== null) {
+                setIsFullWidth(fullWidthPreference === "true");
+            }
+        } catch (error) {
+            console.error("Failed to load data from localStorage", error);
+            localStorage.removeItem(STORAGE_KEY);
+        } finally {
+            setIsLoadingFromStorage(false);
+        }
     }, []);
 
-    const handleFileLoaded = (jsonContent: string) => {
+    const handleFileLoaded = useCallback((jsonContent: string) => {
         try {
             setParseError(null);
 
-            const { account, positions } = parseJSONData(jsonContent);
-
-            if (!account) {
-                throw new Error(
-                    "Failed to parse account data. Please check the file format.",
-                );
-            }
-
-            if (!positions || positions.length === 0) {
-                throw new Error(
-                    "Failed to parse positions data or file is empty. Please check the file format.",
-                );
-            }
-
-            // Save to localStorage
+            const parsed = parsePortfolioData(jsonContent);
             localStorage.setItem(STORAGE_KEY, jsonContent);
-
-            setAccount(account);
-            setPositions(positions);
-        } catch (e) {
+            setAccount(parsed.account);
+            setPositions(parsed.positions);
+        } catch (error) {
             const errorMessage =
-                e instanceof Error
-                    ? e.message
+                error instanceof Error
+                    ? error.message
                     : "Failed to parse data. Please check your JSON file.";
+
             setParseError(errorMessage);
-            console.error("Failed to parse data", e);
+            console.error("Failed to parse data", error);
         }
-    };
+    }, []);
 
-    const handleError = (error: string) => {
-        setParseError(error);
-    };
-
-    const handleReset = () => {
+    const handleReset = useCallback(() => {
         setAccount(null);
         setPositions([]);
         setParseError(null);
-        // Clear localStorage
         localStorage.removeItem(STORAGE_KEY);
-    };
+    }, []);
 
-    const handleToggleFullWidth = () => {
-        const newValue = !isFullWidth;
-        setIsFullWidth(newValue);
-        localStorage.setItem(FULL_WIDTH_STORAGE_KEY, String(newValue));
-    };
+    const handleToggleFullWidth = useCallback(() => {
+        setIsFullWidth((current) => {
+            const next = !current;
+            localStorage.setItem(FULL_WIDTH_STORAGE_KEY, String(next));
+            return next;
+        });
+    }, []);
 
-    // Show loading state while checking localStorage
     if (isLoadingFromStorage) {
-        return (
-            <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-                <div className="text-blue-500 animate-pulse text-xl font-semibold">
-                    Loading Portfolio Data...
-                </div>
-            </div>
-        );
+        return <LoadingScreen />;
     }
 
-    // Show drag and drop interface if no account data is loaded
     if (!account) {
         return (
             <FileDropZone
                 onFileLoaded={handleFileLoaded}
-                onError={handleError}
+                onError={setParseError}
                 parseError={parseError}
             />
         );
     }
 
-    // Calculate some aggregate totals that might be missing or useful
-    const totalDailyPL = positions.reduce(
-        (acc, curr) => acc + curr.today_pl_val,
-        0,
-    );
-    const totalUnrealizedPL = positions.reduce(
-        (acc, curr) => acc + curr.unrealized_pl,
-        0,
-    );
+    const widthClass = isFullWidth ? "max-w-full" : "max-w-7xl";
 
     return (
         <div className="min-h-screen bg-slate-900 pb-12">
-            {/* Header */}
-            <nav className="bg-slate-800 border-b border-slate-700 sticky top-0 z-50">
+            <nav className="sticky top-0 z-50 border-b border-slate-700 bg-slate-800">
                 <div
-                    className={`${
-                        isFullWidth ? "max-w-full" : "max-w-7xl"
-                    } mx-auto px-4 sm:px-6 lg:px-8`}
+                    className={`${widthClass} mx-auto px-4 sm:px-6 lg:px-8`}
                 >
-                    <div className="flex justify-between h-16 items-center">
+                    <div className="flex h-16 items-center justify-between">
                         <div className="flex items-center gap-2">
                             <img
                                 src={FAVICON_PATH}
                                 alt="Alloc logo"
                                 className="h-7 w-7 rounded-sm"
                             />
-                            <span className="font-bold text-xl text-white tracking-tight">
+                            <span className="text-xl font-bold tracking-tight text-white">
                                 <span className="text-blue-500">Alloc</span>{" "}
                                 Dashboard
                             </span>
                         </div>
                         <div className="flex items-center gap-4 text-sm">
                             <button
+                                type="button"
                                 onClick={handleToggleFullWidth}
-                                className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-colors"
+                                className="flex items-center gap-2 rounded-lg bg-slate-700/50 px-3 py-1.5 text-sm text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
                                 title={
                                     isFullWidth
                                         ? "Use Constrained Width"
@@ -182,8 +177,9 @@ const App: React.FC = () => {
                                 </span>
                             </button>
                             <button
+                                type="button"
                                 onClick={handleReset}
-                                className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 rounded-lg transition-colors"
+                                className="flex items-center gap-2 rounded-lg bg-slate-700/50 px-3 py-1.5 text-sm text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
                                 title="Clear Data"
                             >
                                 <Trash2 className="h-4 w-4" />
@@ -197,37 +193,25 @@ const App: React.FC = () => {
             </nav>
 
             <main
-                className={`${
-                    isFullWidth ? "max-w-full" : "max-w-7xl"
-                } mx-auto px-4 sm:px-6 lg:px-8 pt-8`}
+                className={`${widthClass} mx-auto px-4 pt-8 sm:px-6 lg:px-8`}
             >
-                {/* Account Summary */}
                 <section className="mb-2">
-                    {/* <div className="flex justify-between items-end mb-4">
-                        <h1 className="text-2xl font-bold text-white">
-                            Overview
-                        </h1>
-                        <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1 rounded border border-slate-700">
-                            Currency: {account.currency}
-                        </span>
-                    </div> */}
                     <SummaryCard account={account} />
                 </section>
 
-                {/* Charts Section */}
-                <section className="mb-8">
-                    <PortfolioChart positions={positions} />
-                </section>
+                <Suspense fallback={<DashboardFallback />}>
+                    <section className="mb-8">
+                        <PortfolioChart positions={positions} />
+                    </section>
 
-                {/* Positions Table */}
-                <section className="mb-8">
-                    <PositionsTable positions={positions} />
-                </section>
+                    <section className="mb-8">
+                        <PositionsTable positions={positions} />
+                    </section>
 
-                {/* Categorical Analysis */}
-                <section>
-                    <CategoricalAnalysis positions={positions} />
-                </section>
+                    <section>
+                        <CategoricalAnalysis positions={positions} />
+                    </section>
+                </Suspense>
             </main>
         </div>
     );

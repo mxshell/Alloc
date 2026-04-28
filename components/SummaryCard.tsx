@@ -1,213 +1,174 @@
 import React from "react";
 import {
-    TrendingUp,
-    TrendingDown,
-    DollarSign,
-    Wallet,
     Activity,
+    DollarSign,
+    TrendingDown,
+    TrendingUp,
+    Wallet,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { AccountData } from "../types";
-import { formatCurrency } from "../utils/dataParser";
+import { formatCurrency } from "../utils/formatters";
 
 interface SummaryCardProps {
     account: AccountData;
 }
 
-const formatPercentage = (value: number) => {
-    return `${(value * 100).toFixed(2)}%`;
+interface MetricCardProps {
+    icon: LucideIcon;
+    numericValue?: number;
+    subValue?: string;
+    title: string;
+    trend?: "up" | "down" | "neutral";
+    value: string;
+}
+
+const trendLabelClass: Record<NonNullable<MetricCardProps["trend"]>, string> =
+    {
+        up: "bg-emerald-500/10 text-emerald-400",
+        down: "bg-rose-500/10 text-rose-400",
+        neutral: "bg-slate-700 text-slate-400",
+    };
+
+const trendLabelText: Record<NonNullable<MetricCardProps["trend"]>, string> = {
+    up: "Long",
+    down: "Short",
+    neutral: "Neutral",
 };
 
-const Card = ({
-    title,
-    value,
-    subValue,
-    icon: Icon,
-    trend,
-    numericValue,
-    valueColor,
-}: {
-    title: string;
-    value: string;
-    subValue?: string;
-    icon: any;
-    trend?: "up" | "down" | "neutral";
-    numericValue?: number;
-    valueColor?: "red" | "green" | string;
-}) => {
-    // Determine the color for the value
-    let colorClass = "text-slate-100"; // default
-
-    if (valueColor) {
-        if (valueColor === "red") {
-            colorClass = "text-rose-400";
-        } else if (valueColor === "green") {
-            colorClass = "text-emerald-400";
-        } else {
-            // Custom color - use inline style for arbitrary colors
-            // For Tailwind classes, you could also use arbitrary values like text-[#ff0000]
-            colorClass = "";
-        }
-    } else if (numericValue !== undefined) {
-        // Auto-determine color based on sign
-        colorClass = numericValue >= 0 ? "text-emerald-400" : "text-rose-400";
+const formatAllocation = (value: number, totalAssets: number) => {
+    if (!Number.isFinite(totalAssets) || totalAssets <= 0) {
+        return "0.00% of Total Assets";
     }
 
+    return `${((value / totalAssets) * 100).toFixed(2)}% of Total Assets`;
+};
+
+const MetricCard: React.FC<MetricCardProps> = ({
+    icon: Icon,
+    numericValue,
+    subValue,
+    title,
+    trend,
+    value,
+}) => {
+    const valueClass =
+        numericValue === undefined
+            ? "text-slate-100"
+            : numericValue >= 0
+              ? "text-emerald-400"
+              : "text-rose-400";
+
     return (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex justify-between items-start mb-2">
-                <div className="p-2 bg-slate-700/50 rounded-lg">
-                    <Icon className="w-5 h-5 text-slate-400" />
+        <div className="rounded-xl border border-slate-700 bg-slate-800 p-5 shadow-sm transition-shadow hover:shadow-md">
+            <div className="mb-2 flex items-start justify-between">
+                <div className="rounded-lg bg-slate-700/50 p-2">
+                    <Icon className="h-5 w-5 text-slate-400" />
                 </div>
                 {trend && (
                     <span
-                        className={`text-xs font-medium px-2 py-1 rounded-full ${
-                            trend === "up"
-                                ? "bg-emerald-500/10 text-emerald-400"
-                                : trend === "down"
-                                ? "bg-rose-500/10 text-rose-400"
-                                : "bg-slate-700 text-slate-400"
-                        }`}
+                        className={`rounded-full px-2 py-1 text-xs font-medium ${trendLabelClass[trend]}`}
                     >
-                        {trend === "up"
-                            ? "Long"
-                            : trend === "down"
-                            ? "Short"
-                            : "Neutral"}
+                        {trendLabelText[trend]}
                     </span>
                 )}
             </div>
-            <h3 className="text-slate-400 text-sm font-medium mb-1">{title}</h3>
-            <div
-                className={`text-2xl font-bold ${colorClass}`}
-                style={
-                    valueColor && valueColor !== "red" && valueColor !== "green"
-                        ? { color: valueColor }
-                        : undefined
-                }
-            >
-                {value}
-            </div>
+            <h3 className="mb-1 text-sm font-medium text-slate-400">
+                {title}
+            </h3>
+            <div className={`text-2xl font-bold ${valueClass}`}>{value}</div>
             {subValue && (
-                <div className="text-sm text-slate-500 mt-1">{subValue}</div>
+                <div className="mt-1 text-sm text-slate-500">{subValue}</div>
             )}
         </div>
     );
 };
 
 const SummaryCard: React.FC<SummaryCardProps> = ({ account }) => {
-    // Calculate a mock Daily P/L roughly based on unrealized for demo if not explicitly separate
-    // The CSV has 'unrealized_pl' as "N/A" in the account file, but we can sum it from positions if needed.
-    // However, let's use what we have.
+    const totalAssets = account.total_assets;
+    const metrics: MetricCardProps[] = [
+        {
+            title: "Total Assets",
+            value: formatCurrency(totalAssets),
+            subValue: "Net Liquidation Value",
+            icon: Wallet,
+        },
+        {
+            title: "Market Value (Long Positions)",
+            value: formatCurrency(account.long_mv),
+            subValue: formatAllocation(account.long_mv, totalAssets),
+            icon: TrendingUp,
+            trend: "up",
+        },
+        {
+            title: "Market Value (Short Positions)",
+            value: formatCurrency(account.short_mv),
+            subValue: formatAllocation(account.short_mv, totalAssets),
+            icon: TrendingDown,
+            trend: "down",
+        },
+        {
+            title: "Total Fund Assets",
+            value: formatCurrency(account.fund_assets),
+            subValue: formatAllocation(account.fund_assets, totalAssets),
+            icon: DollarSign,
+        },
+        {
+            title: "Total Bond Assets",
+            value: formatCurrency(account.bond_assets),
+            subValue: formatAllocation(account.bond_assets, totalAssets),
+            icon: DollarSign,
+        },
+        {
+            title: "Total Cash Assets",
+            value: formatCurrency(account.cash),
+            subValue: formatAllocation(account.cash, totalAssets),
+            icon: DollarSign,
+        },
+        {
+            title: "Maintenance Margin",
+            value: formatCurrency(account.maintenance_margin),
+            subValue: `Initial Margin: ${formatCurrency(account.initial_margin)}`,
+            icon: Activity,
+        },
+        {
+            title: "Max Buying Power",
+            value: formatCurrency(account.power),
+            subValue: `Max Shorting Power: ${formatCurrency(account.max_power_short)}`,
+            icon: Activity,
+        },
+        {
+            title: "Realized PL (Stocks)",
+            value: formatCurrency(account.total_pl_realized_stocks),
+            numericValue: account.total_pl_realized_stocks,
+            icon: DollarSign,
+        },
+        {
+            title: "Unrealized PL (Stocks)",
+            value: formatCurrency(account.total_pl_unrealized_stocks),
+            numericValue: account.total_pl_unrealized_stocks,
+            icon: DollarSign,
+        },
+        {
+            title: "Unrealized PL (Options)",
+            value: formatCurrency(account.total_pl_unrealized_options),
+            numericValue: account.total_pl_unrealized_options,
+            icon: DollarSign,
+        },
+        {
+            title: "Total PL",
+            value: formatCurrency(account.total_pl_potential),
+            numericValue: account.total_pl_potential,
+            subValue: "Realized + Unrealized",
+            icon: DollarSign,
+        },
+    ];
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <Card
-                title="Total Assets"
-                value={formatCurrency(account.total_assets)}
-                subValue="Net Liquidation Value"
-                icon={Wallet}
-            />
-
-            <Card
-                title="Market Value (Long Positions)"
-                value={formatCurrency(account.long_mv)}
-                subValue={
-                    formatPercentage(account.long_mv / account.total_assets) +
-                    " of Total Assets"
-                }
-                icon={TrendingUp}
-                trend="up"
-            />
-
-            <Card
-                title="Market Value (Short Positions)"
-                value={formatCurrency(account.short_mv)}
-                subValue={
-                    formatPercentage(account.short_mv / account.total_assets) +
-                    " of Total Assets"
-                }
-                icon={TrendingDown}
-                trend="down"
-            />
-
-            <Card
-                title="Total Fund Assets"
-                value={formatCurrency(account.fund_assets)}
-                subValue={
-                    formatPercentage(
-                        account.fund_assets / account.total_assets
-                    ) + " of Total Assets"
-                }
-                icon={DollarSign}
-            />
-
-            <Card
-                title="Total Bond Assets"
-                value={formatCurrency(account.bond_assets)}
-                subValue={
-                    formatPercentage(
-                        account.bond_assets / account.total_assets
-                    ) + " of Total Assets"
-                }
-                icon={DollarSign}
-            />
-
-            <Card
-                title="Total Cash Assets"
-                value={formatCurrency(account.cash)}
-                subValue={
-                    formatPercentage(account.cash / account.total_assets) +
-                    " of Total Assets"
-                }
-                icon={DollarSign}
-            />
-
-            <Card
-                title="Maintenance Margin"
-                value={formatCurrency(account.maintenance_margin)}
-                subValue={`Initial Margin: ${formatCurrency(
-                    account.initial_margin
-                )}`}
-                icon={Activity}
-            />
-
-            <Card
-                title="Max Buying Power"
-                value={formatCurrency(account.power)}
-                subValue={`Max Shorting Power: ${formatCurrency(
-                    account.max_power_short
-                )}`}
-                icon={Activity}
-            />
-
-            <Card
-                title="Realized PL (Stocks)"
-                value={formatCurrency(account.total_pl_realized_stocks)}
-                numericValue={account.total_pl_realized_stocks}
-                icon={DollarSign}
-            />
-
-            <Card
-                title="Unrealized PL (Stocks)"
-                value={formatCurrency(account.total_pl_unrealized_stocks)}
-                numericValue={account.total_pl_unrealized_stocks}
-                icon={DollarSign}
-            />
-
-            <Card
-                title="Unrealized PL (Options)"
-                value={formatCurrency(account.total_pl_unrealized_options)}
-                numericValue={account.total_pl_unrealized_options}
-                icon={DollarSign}
-            />
-
-            <Card
-                title="Total PL"
-                value={formatCurrency(account.total_pl_potential)}
-                numericValue={account.total_pl_potential}
-                subValue="Realized + Unrealized"
-                icon={DollarSign}
-            />
+        <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {metrics.map((metric) => (
+                <MetricCard key={metric.title} {...metric} />
+            ))}
         </div>
     );
 };

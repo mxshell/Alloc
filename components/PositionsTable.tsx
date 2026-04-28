@@ -1,36 +1,48 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     ArrowUpDown,
-    ChevronUp,
-    ChevronDown,
-    Search,
-    Layers,
     Box,
-    FileText,
-    Settings,
+    ChevronDown,
+    ChevronUp,
     Eye,
     EyeOff,
+    FileText,
+    Layers,
+    Search,
+    Settings,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { PositionData, SortConfig } from "../types";
 import {
     formatCurrency,
     formatPercent,
     formatPercentageOfPortfolio,
     truncateString,
-} from "../utils/dataParser";
+} from "../utils/formatters";
+import { isOptionCode, stripMarketPrefix } from "../utils/portfolio";
 
 interface PositionsTableProps {
     positions: PositionData[];
 }
 
 type FilterType = "ALL" | "STOCK" | "OPTION";
+type ColumnKey = keyof PositionData;
+type ColumnVisibility = Partial<Record<ColumnKey, boolean>>;
 
 interface ColumnConfig {
-    key: keyof PositionData;
+    key: ColumnKey;
     label: string;
     align?: "left" | "right";
     defaultVisible: boolean;
 }
+
+interface AssetFilterConfig {
+    icon: LucideIcon;
+    label: string;
+    value: FilterType;
+}
+
+const STORAGE_KEY = "positions_table_column_visibility";
 
 const COLUMNS: ColumnConfig[] = [
     { key: "code", label: "Symbol", align: "left", defaultVisible: true },
@@ -91,7 +103,311 @@ const COLUMNS: ColumnConfig[] = [
     },
 ];
 
-const STORAGE_KEY = "positions_table_column_visibility";
+const ASSET_FILTERS: AssetFilterConfig[] = [
+    { value: "ALL", label: "All", icon: Layers },
+    { value: "STOCK", label: "Stocks", icon: Box },
+    { value: "OPTION", label: "Options", icon: FileText },
+];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+const getDefaultColumnVisibility = () =>
+    COLUMNS.reduce<ColumnVisibility>((visibility, column) => {
+        visibility[column.key] = column.defaultVisible;
+        return visibility;
+    }, {});
+
+const loadColumnVisibility = () => {
+    const defaults = getDefaultColumnVisibility();
+
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) return defaults;
+
+        const parsed: unknown = JSON.parse(saved);
+        if (!isRecord(parsed)) return defaults;
+
+        return COLUMNS.reduce<ColumnVisibility>((visibility, column) => {
+            const savedValue = parsed[column.key];
+            visibility[column.key] =
+                typeof savedValue === "boolean"
+                    ? savedValue
+                    : column.defaultVisible;
+            return visibility;
+        }, defaults);
+    } catch (error) {
+        console.error("Failed to load column visibility preferences", error);
+        return defaults;
+    }
+};
+
+const isColumnVisible = (column: ColumnConfig, visibility: ColumnVisibility) =>
+    visibility[column.key] ?? column.defaultVisible;
+
+const getComparableValue = (position: PositionData, key: ColumnKey) => {
+    const value = position[key];
+
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    if (typeof value === "boolean") return value ? 1 : 0;
+    if (value === null || value === undefined) return "";
+
+    return String(value).toLowerCase();
+};
+
+const comparePositions = (
+    a: PositionData,
+    b: PositionData,
+    sortConfig: SortConfig,
+) => {
+    const aValue = getComparableValue(a, sortConfig.key);
+    const bValue = getComparableValue(b, sortConfig.key);
+
+    const comparison =
+        typeof aValue === "number" && typeof bValue === "number"
+            ? aValue - bValue
+            : String(aValue).localeCompare(String(bValue), undefined, {
+                  numeric: true,
+              });
+
+    return sortConfig.direction === "asc" ? comparison : -comparison;
+};
+
+const signedValueClass = (value: number) =>
+    value >= 0 ? "text-emerald-400" : "text-rose-400";
+
+const SegmentButton: React.FC<{
+    active: boolean;
+    filter: AssetFilterConfig;
+    onClick: (value: FilterType) => void;
+}> = ({ active, filter, onClick }) => {
+    const Icon = filter.icon;
+
+    return (
+        <button
+            type="button"
+            onClick={() => onClick(filter.value)}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all sm:flex-none ${
+                active
+                    ? "bg-slate-700 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200"
+            }`}
+        >
+            <Icon className="h-3.5 w-3.5" />
+            {filter.label}
+        </button>
+    );
+};
+
+const HeaderCell: React.FC<{
+    column: ColumnConfig;
+    isVisible: boolean;
+    onSort: (key: ColumnKey) => void;
+    sortConfig: SortConfig;
+}> = ({ column, isVisible, onSort, sortConfig }) => {
+    if (!isVisible) return null;
+
+    const align = column.align ?? "right";
+    const alignClass = align === "right" ? "text-right" : "text-left";
+    const isSorted = sortConfig.key === column.key;
+    const SortIcon = isSorted
+        ? sortConfig.direction === "asc"
+            ? ChevronUp
+            : ChevronDown
+        : ArrowUpDown;
+
+    return (
+        <th
+            className={`px-4 py-3 ${alignClass} text-xs font-semibold uppercase tracking-wider text-slate-400 transition-colors hover:text-slate-200`}
+        >
+            <button
+                type="button"
+                onClick={() => onSort(column.key)}
+                className={`inline-flex items-center gap-1 ${
+                    align === "right" ? "justify-end" : "justify-start"
+                }`}
+            >
+                {column.label}
+                <SortIcon
+                    className={`h-3 w-3 ${isSorted ? "" : "opacity-30"}`}
+                />
+            </button>
+        </th>
+    );
+};
+
+const ColumnVisibilityMenu: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onToggleColumn: (key: ColumnKey) => void;
+    onToggleMenu: () => void;
+    visibility: ColumnVisibility;
+}> = ({ isOpen, onClose, onToggleColumn, onToggleMenu, visibility }) => (
+    <div className="relative">
+        <button
+            type="button"
+            onClick={onToggleMenu}
+            className="flex items-center justify-center rounded-lg border border-slate-600 bg-slate-900 p-2 text-slate-400 transition-all hover:border-slate-500 hover:text-slate-200"
+            title="Column visibility"
+            aria-label="Column visibility"
+        >
+            <Settings className="h-4 w-4" />
+        </button>
+        {isOpen && (
+            <>
+                <div className="fixed inset-0 z-10" onClick={onClose} />
+                <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-xl">
+                    <div className="border-b border-slate-700 p-3">
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
+                            <Eye className="h-3.5 w-3.5" />
+                            Column Visibility
+                        </div>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                        {COLUMNS.map((column) => {
+                            const visible = isColumnVisible(
+                                column,
+                                visibility,
+                            );
+
+                            return (
+                                <button
+                                    type="button"
+                                    key={column.key}
+                                    onClick={() => onToggleColumn(column.key)}
+                                    className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-slate-800"
+                                >
+                                    <span className="flex-1 text-sm text-slate-300">
+                                        {column.label}
+                                    </span>
+                                    {visible ? (
+                                        <Eye className="h-4 w-4 text-blue-400" />
+                                    ) : (
+                                        <EyeOff className="h-4 w-4 text-slate-600" />
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            </>
+        )}
+    </div>
+);
+
+const SymbolCell: React.FC<{ position: PositionData }> = ({ position }) => {
+    const isOption = isOptionCode(position.code);
+    const Icon = isOption ? FileText : Box;
+
+    return (
+        <div className="flex items-center gap-2">
+            <Icon
+                className={`h-4 w-4 transition-colors ${
+                    isOption
+                        ? "text-purple-400/50 group-hover:text-purple-400"
+                        : "text-blue-400/50 group-hover:text-blue-400"
+                }`}
+            />
+            {isOption ? (
+                <div className="text-sm font-medium text-white">
+                    {position.stock_name}
+                </div>
+            ) : (
+                <div>
+                    <div className="text-sm font-medium text-white">
+                        {stripMarketPrefix(position.code)}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                        {truncateString(position.stock_name)}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const renderCell = (position: PositionData, column: ColumnConfig) => {
+    switch (column.key) {
+        case "code":
+            return <SymbolCell position={position} />;
+        case "position_side":
+            return (
+                <span
+                    className={`rounded-full px-2 py-1 text-xs font-medium ${
+                        position.position_side === "LONG"
+                            ? "bg-blue-500/10 text-blue-400"
+                            : "bg-purple-500/10 text-purple-400"
+                    }`}
+                >
+                    {position.position_side}
+                </span>
+            );
+        case "qty":
+            return (
+                <span className="text-sm text-slate-300">
+                    {position.qty.toLocaleString()}
+                </span>
+            );
+        case "average_cost":
+            return (
+                <span className="text-sm text-slate-300">
+                    {formatCurrency(position.average_cost)}
+                </span>
+            );
+        case "diluted_cost":
+            return (
+                <span className="text-sm text-slate-300">
+                    {formatCurrency(position.diluted_cost)}
+                </span>
+            );
+        case "nominal_price":
+            return (
+                <span className="text-sm text-slate-300">
+                    {formatCurrency(position.nominal_price)}
+                </span>
+            );
+        case "market_val":
+            return (
+                <span className="text-sm font-bold text-slate-100">
+                    {formatCurrency(position.market_val)}
+                </span>
+            );
+        case "percentage_of_portfolio":
+            return (
+                <span className="text-sm font-medium text-slate-300">
+                    {formatPercentageOfPortfolio(
+                        position.percentage_of_portfolio,
+                    )}
+                </span>
+            );
+        case "realized_pl":
+            return (
+                <span
+                    className={`text-sm font-medium ${signedValueClass(position.realized_pl)}`}
+                >
+                    {formatCurrency(position.realized_pl)}
+                </span>
+            );
+        case "unrealized_pl":
+            return (
+                <span
+                    className={`text-sm font-medium ${signedValueClass(position.unrealized_pl)}`}
+                >
+                    {formatCurrency(position.unrealized_pl)}
+                </span>
+            );
+        case "pl_ratio":
+            return (
+                <span
+                    className={`text-sm font-medium ${signedValueClass(position.pl_ratio)}`}
+                >
+                    {formatPercent(position.pl_ratio)}
+                </span>
+            );
+        default:
+            return String(position[column.key] ?? "");
+    }
+};
 
 const PositionsTable: React.FC<PositionsTableProps> = ({ positions }) => {
     const [sortConfig, setSortConfig] = useState<SortConfig>({
@@ -101,453 +417,151 @@ const PositionsTable: React.FC<PositionsTableProps> = ({ positions }) => {
     const [filterText, setFilterText] = useState("");
     const [assetFilter, setAssetFilter] = useState<FilterType>("ALL");
     const [showColumnMenu, setShowColumnMenu] = useState(false);
+    const [columnVisibility, setColumnVisibility] =
+        useState<ColumnVisibility>(loadColumnVisibility);
 
-    // Initialize column visibility from localStorage or defaults
-    const [columnVisibility, setColumnVisibility] = useState<
-        Record<string, boolean>
-    >(() => {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                // Merge with defaults to handle new columns
-                const defaults = COLUMNS.reduce((acc, col) => {
-                    acc[col.key] = col.defaultVisible;
-                    return acc;
-                }, {} as Record<string, boolean>);
-                return { ...defaults, ...parsed };
-            }
-        } catch (e) {
-            console.error("Failed to load column visibility preferences", e);
-        }
-        return COLUMNS.reduce((acc, col) => {
-            acc[col.key] = col.defaultVisible;
-            return acc;
-        }, {} as Record<string, boolean>);
-    });
-
-    // Save to localStorage whenever visibility changes
     useEffect(() => {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(columnVisibility));
-        } catch (e) {
-            console.error("Failed to save column visibility preferences", e);
+            localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify(columnVisibility),
+            );
+        } catch (error) {
+            console.error("Failed to save column visibility preferences", error);
         }
     }, [columnVisibility]);
 
-    const toggleColumnVisibility = (key: string) => {
-        setColumnVisibility((prev) => ({
-            ...prev,
-            [key]: !prev[key],
+    const visibleColumns = useMemo(
+        () =>
+            COLUMNS.filter((column) =>
+                isColumnVisible(column, columnVisibility),
+            ),
+        [columnVisibility],
+    );
+
+    const filteredPositions = useMemo(() => {
+        const searchTerm = filterText.trim().toLowerCase();
+
+        return positions
+            .filter((position) => {
+                const matchesSearch =
+                    !searchTerm ||
+                    position.code.toLowerCase().includes(searchTerm) ||
+                    position.stock_name.toLowerCase().includes(searchTerm);
+
+                if (!matchesSearch) return false;
+                if (assetFilter === "ALL") return true;
+
+                const option = isOptionCode(position.code);
+                return assetFilter === "OPTION" ? option : !option;
+            })
+            .sort((a, b) => comparePositions(a, b, sortConfig));
+    }, [assetFilter, filterText, positions, sortConfig]);
+
+    const handleSort = (key: ColumnKey) => {
+        setSortConfig((current) => ({
+            key,
+            direction:
+                current.key === key && current.direction === "desc"
+                    ? "asc"
+                    : "desc",
         }));
     };
 
-    const handleSort = (key: keyof PositionData) => {
-        let direction: "asc" | "desc" = "desc";
-        if (sortConfig.key === key && sortConfig.direction === "desc") {
-            direction = "asc";
-        }
-        setSortConfig({ key, direction });
-    };
-
-    // Helper to determine if a position is an option based on the code format
-    // Dataset format ex: US.TSLA280121P380000 (Symbol + Date + P/C + Strike)
-    const isOption = (code: string) => /[0-9]{6}[CP][0-9]+/.test(code);
-
-    const stripMarketPrefix = (code: string) => {
-        if (code.startsWith("US.")) {
-            return code.slice(3);
-        }
-        return code;
-    };
-
-    const sortedData = useMemo(() => {
-        let filtered = positions;
-
-        // 1. Text Search Filter
-        if (filterText) {
-            const lower = filterText.toLowerCase();
-            filtered = filtered.filter(
-                (p) =>
-                    p.code.toLowerCase().includes(lower) ||
-                    p.stock_name.toLowerCase().includes(lower)
-            );
-        }
-
-        // 2. Asset Type Filter
-        if (assetFilter !== "ALL") {
-            filtered = filtered.filter((p) => {
-                const isOpt = isOption(p.code);
-                return assetFilter === "OPTION" ? isOpt : !isOpt;
-            });
-        }
-
-        // 3. Sorting
-        return [...filtered].sort((a, b) => {
-            const aValue = a[sortConfig.key];
-            const bValue = b[sortConfig.key];
-
-            if (aValue === bValue) return 0;
-
-            const comparison = aValue > bValue ? 1 : -1;
-            return sortConfig.direction === "asc" ? comparison : -comparison;
-        });
-    }, [positions, sortConfig, filterText, assetFilter]);
-
-    const Th: React.FC<{
-        label: string;
-        sortKey: keyof PositionData;
-        align?: "left" | "right";
-    }> = ({ label, sortKey, align = "right" }) => {
-        if (!columnVisibility[sortKey]) return null;
-        return (
-            <th
-                className={`px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200 transition-colors text-${align}`}
-                onClick={() => handleSort(sortKey)}
-            >
-                <div
-                    className={`flex items-center gap-1 ${
-                        align === "right" ? "justify-end" : "justify-start"
-                    }`}
-                >
-                    {label}
-                    {sortConfig.key === sortKey &&
-                        (sortConfig.direction === "asc" ? (
-                            <ChevronUp className="w-3 h-3" />
-                        ) : (
-                            <ChevronDown className="w-3 h-3" />
-                        ))}
-                    {sortConfig.key !== sortKey && (
-                        <ArrowUpDown className="w-3 h-3 opacity-30" />
-                    )}
-                </div>
-            </th>
-        );
+    const toggleColumnVisibility = (key: ColumnKey) => {
+        const column = COLUMNS.find((entry) => entry.key === key);
+        setColumnVisibility((current) => ({
+            ...current,
+            [key]: !(current[key] ?? column?.defaultVisible ?? true),
+        }));
     };
 
     return (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-sm">
-            <div className="p-5 border-b border-slate-700 flex flex-col lg:flex-row justify-between items-center gap-4">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+        <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800 shadow-sm">
+            <div className="flex flex-col items-center justify-between gap-4 border-b border-slate-700 p-5 lg:flex-row">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-white">
                     Holdings
-                    <span className="text-xs font-normal text-slate-500 bg-slate-900 px-2 py-0.5 rounded-full border border-slate-700">
-                        {sortedData.length}
+                    <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs font-normal text-slate-500">
+                        {filteredPositions.length}
                     </span>
                 </h2>
 
-                <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-                    {/* Asset Type Toggle */}
-                    <div className="bg-slate-900 p-1 rounded-lg flex border border-slate-700">
-                        <button
-                            onClick={() => setAssetFilter("ALL")}
-                            className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
-                                assetFilter === "ALL"
-                                    ? "bg-slate-700 text-white shadow-sm"
-                                    : "text-slate-400 hover:text-slate-200"
-                            }`}
-                        >
-                            <Layers className="w-3.5 h-3.5" />
-                            All
-                        </button>
-                        <button
-                            onClick={() => setAssetFilter("STOCK")}
-                            className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
-                                assetFilter === "STOCK"
-                                    ? "bg-slate-700 text-white shadow-sm"
-                                    : "text-slate-400 hover:text-slate-200"
-                            }`}
-                        >
-                            <Box className="w-3.5 h-3.5" />
-                            Stocks
-                        </button>
-                        <button
-                            onClick={() => setAssetFilter("OPTION")}
-                            className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
-                                assetFilter === "OPTION"
-                                    ? "bg-slate-700 text-white shadow-sm"
-                                    : "text-slate-400 hover:text-slate-200"
-                            }`}
-                        >
-                            <FileText className="w-3.5 h-3.5" />
-                            Options
-                        </button>
+                <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+                    <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-1">
+                        {ASSET_FILTERS.map((filter) => (
+                            <SegmentButton
+                                key={filter.value}
+                                active={assetFilter === filter.value}
+                                filter={filter}
+                                onClick={setAssetFilter}
+                            />
+                        ))}
                     </div>
 
-                    {/* Search Input */}
                     <div className="relative w-full sm:w-64">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                             <Search className="h-4 w-4 text-slate-500" />
                         </div>
                         <input
                             type="text"
-                            className="bg-slate-900 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full pl-10 p-2 placeholder-slate-500"
+                            className="block w-full rounded-lg border border-slate-600 bg-slate-900 p-2 pl-10 text-sm text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:ring-blue-500"
                             placeholder="Search symbol..."
                             value={filterText}
-                            onChange={(e) => setFilterText(e.target.value)}
+                            onChange={(event) =>
+                                setFilterText(event.target.value)
+                            }
                         />
                     </div>
 
-                    {/* Column Visibility Toggle */}
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowColumnMenu(!showColumnMenu)}
-                            className="bg-slate-900 border border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 rounded-lg p-2 transition-all flex items-center justify-center"
-                            title="Column visibility"
-                        >
-                            <Settings className="h-4 w-4" />
-                        </button>
-                        {showColumnMenu && (
-                            <>
-                                <div
-                                    className="fixed inset-0 z-10"
-                                    onClick={() => setShowColumnMenu(false)}
-                                />
-                                <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-20 overflow-hidden">
-                                    <div className="p-3 border-b border-slate-700">
-                                        <div className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                                            <Eye className="w-3.5 h-3.5" />
-                                            Column Visibility
-                                        </div>
-                                    </div>
-                                    <div className="max-h-80 overflow-y-auto">
-                                        {COLUMNS.map((column) => {
-                                            const isVisible =
-                                                columnVisibility[column.key] ??
-                                                column.defaultVisible;
-                                            return (
-                                                <button
-                                                    key={column.key}
-                                                    onClick={() =>
-                                                        toggleColumnVisibility(
-                                                            column.key
-                                                        )
-                                                    }
-                                                    className="flex items-center gap-3 px-3 py-2 hover:bg-slate-800 cursor-pointer transition-colors w-full text-left"
-                                                >
-                                                    <span className="text-sm text-slate-300 flex-1">
-                                                        {column.label}
-                                                    </span>
-                                                    {isVisible ? (
-                                                        <Eye className="w-4 h-4 text-blue-400" />
-                                                    ) : (
-                                                        <EyeOff className="w-4 h-4 text-slate-600" />
-                                                    )}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
+                    <ColumnVisibilityMenu
+                        isOpen={showColumnMenu}
+                        onClose={() => setShowColumnMenu(false)}
+                        onToggleColumn={toggleColumnVisibility}
+                        onToggleMenu={() =>
+                            setShowColumnMenu((current) => !current)
+                        }
+                        visibility={columnVisibility}
+                    />
                 </div>
             </div>
 
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-700">
-                    <thead className="bg-slate-750">
+                    <thead className="bg-slate-900/80">
                         <tr>
                             {COLUMNS.map((column) => (
-                                <Th
+                                <HeaderCell
                                     key={column.key}
-                                    label={column.label}
-                                    sortKey={column.key}
-                                    align={column.align}
+                                    column={column}
+                                    isVisible={isColumnVisible(
+                                        column,
+                                        columnVisibility,
+                                    )}
+                                    onSort={handleSort}
+                                    sortConfig={sortConfig}
                                 />
                             ))}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700 bg-slate-800">
-                        {sortedData.length > 0 ? (
-                            sortedData.map((pos) => (
+                        {filteredPositions.length > 0 ? (
+                            filteredPositions.map((position, index) => (
                                 <tr
-                                    key={pos.code}
-                                    className="hover:bg-slate-700/50 transition-colors group"
+                                    key={`${position.code}-${index}`}
+                                    className="group transition-colors hover:bg-slate-700/50"
                                 >
-                                    {COLUMNS.map((column) => {
-                                        if (!columnVisibility[column.key])
-                                            return null;
-
-                                        const alignClass =
+                                    {visibleColumns.map((column) => {
+                                        const align =
                                             column.align === "left"
                                                 ? "text-left"
                                                 : "text-right";
 
-                                        // Render cell content based on column key
-                                        let cellContent: React.ReactNode;
-                                        let cellClassName = `px-4 py-3 whitespace-nowrap font-mono ${alignClass}`;
-
-                                        switch (column.key) {
-                                            case "code":
-                                                cellContent = (
-                                                    <div className="flex items-center gap-2">
-                                                        {isOption(pos.code) ? (
-                                                            <FileText className="w-4 h-4 text-purple-400/50 group-hover:text-purple-400 transition-colors" />
-                                                        ) : (
-                                                            <Box className="w-4 h-4 text-blue-400/50 group-hover:text-blue-400 transition-colors" />
-                                                        )}
-                                                        {isOption(pos.code) ? (
-                                                            <div>
-                                                                <div className="text-sm font-medium text-white">
-                                                                    {
-                                                                        pos.stock_name
-                                                                    }
-                                                                </div>
-                                                            </div>
-                                                        ) : (
-                                                            <div>
-                                                                <div className="text-sm font-medium text-white">
-                                                                    {stripMarketPrefix(
-                                                                        pos.code
-                                                                    )}
-                                                                </div>
-                                                                <div className="text-xs text-slate-500">
-                                                                    {truncateString(
-                                                                        pos.stock_name
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                                cellClassName += " text-left";
-                                                break;
-
-                                            case "position_side":
-                                                cellContent = (
-                                                    <span
-                                                        className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                                            pos.position_side ===
-                                                            "LONG"
-                                                                ? "bg-blue-500/10 text-blue-400"
-                                                                : "bg-purple-500/10 text-purple-400"
-                                                        }`}
-                                                    >
-                                                        {pos.position_side}
-                                                    </span>
-                                                );
-                                                cellClassName += " text-left";
-                                                break;
-
-                                            case "qty":
-                                                cellContent = (
-                                                    <span className="text-sm text-slate-300">
-                                                        {pos.qty}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "average_cost":
-                                                cellContent = (
-                                                    <span className="text-sm text-slate-300">
-                                                        {formatCurrency(
-                                                            pos.average_cost
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "diluted_cost":
-                                                cellContent = (
-                                                    <span className="text-sm text-slate-300">
-                                                        {formatCurrency(
-                                                            pos.diluted_cost
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "nominal_price":
-                                                cellContent = (
-                                                    <span className="text-sm text-slate-300">
-                                                        {formatCurrency(
-                                                            pos.nominal_price
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "market_val":
-                                                cellContent = (
-                                                    <span className="text-sm font-bold text-slate-100">
-                                                        {formatCurrency(
-                                                            pos.market_val
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "percentage_of_portfolio":
-                                                cellContent = (
-                                                    <span className="text-sm font-medium text-slate-300">
-                                                        {formatPercentageOfPortfolio(
-                                                            pos.percentage_of_portfolio
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "realized_pl":
-                                                cellContent = (
-                                                    <span
-                                                        className={`text-sm font-medium ${
-                                                            pos.realized_pl >= 0
-                                                                ? "text-emerald-400"
-                                                                : "text-rose-400"
-                                                        }`}
-                                                    >
-                                                        {formatCurrency(
-                                                            pos.realized_pl
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "unrealized_pl":
-                                                cellContent = (
-                                                    <span
-                                                        className={`text-sm font-medium ${
-                                                            pos.unrealized_pl >=
-                                                            0
-                                                                ? "text-emerald-400"
-                                                                : "text-rose-400"
-                                                        }`}
-                                                    >
-                                                        {formatCurrency(
-                                                            pos.unrealized_pl
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            case "pl_ratio":
-                                                cellContent = (
-                                                    <span
-                                                        className={`text-sm font-medium ${
-                                                            pos.pl_ratio >= 0
-                                                                ? "text-emerald-400"
-                                                                : "text-rose-400"
-                                                        }`}
-                                                    >
-                                                        {formatPercent(
-                                                            pos.pl_ratio
-                                                        )}
-                                                    </span>
-                                                );
-                                                break;
-
-                                            default:
-                                                cellContent = String(
-                                                    pos[column.key] ?? ""
-                                                );
-                                        }
-
                                         return (
                                             <td
                                                 key={column.key}
-                                                className={cellClassName}
+                                                className={`whitespace-nowrap px-4 py-3 font-mono ${align}`}
                                             >
-                                                {cellContent}
+                                                {renderCell(position, column)}
                                             </td>
                                         );
                                     })}
@@ -556,11 +570,7 @@ const PositionsTable: React.FC<PositionsTableProps> = ({ positions }) => {
                         ) : (
                             <tr>
                                 <td
-                                    colSpan={
-                                        COLUMNS.filter(
-                                            (col) => columnVisibility[col.key]
-                                        ).length
-                                    }
+                                    colSpan={Math.max(visibleColumns.length, 1)}
                                     className="px-4 py-12 text-center text-slate-500"
                                 >
                                     No positions found matching your filter.
@@ -569,9 +579,6 @@ const PositionsTable: React.FC<PositionsTableProps> = ({ positions }) => {
                         )}
                     </tbody>
                 </table>
-            </div>
-            <div className="px-5 py-3 border-t border-slate-700 bg-slate-800 text-xs text-slate-500 flex justify-between">
-                {/* <span>Values in {positions[0]?.currency || "USD"}</span> */}
             </div>
         </div>
     );
