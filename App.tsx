@@ -6,9 +6,6 @@ import SummaryCard from "./components/SummaryCard";
 import FileDropZone from "./components/FileDropZone";
 
 const PortfolioChart = lazy(() => import("./components/PortfolioChart"));
-const TargetAllocationPlanner = lazy(
-    () => import("./components/TargetAllocationPlanner"),
-);
 const PositionsTable = lazy(() => import("./components/PositionsTable"));
 const CategoricalAnalysis = lazy(
     () => import("./components/CategoricalAnalysis"),
@@ -205,13 +202,6 @@ const App: React.FC = () => {
                 <Suspense fallback={<DashboardFallback />}>
                     <section className="mb-8">
                         <PortfolioChart positions={positions} />
-                    </section>
-
-                    <section className="mb-8">
-                        <TargetAllocationPlanner
-                            account={account}
-                            positions={positions}
-                        />
                     </section>
 
                     <section className="mb-8">
