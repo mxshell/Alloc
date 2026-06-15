@@ -10,6 +10,7 @@ from console_output import error, info, success, warning
 from moomoo_export import (
     configure_moomoo_console_logging,
     export_account_data_for_web,
+    export_trade_deals_for_web,
     get_trade_context,
     moomoo_is_running,
 )
@@ -268,6 +269,7 @@ def main():
 
         launch_state.export_started = True
         export_account_data_for_web(trd_ctx=trd_ctx)
+        export_trade_deals_for_web(trd_ctx=trd_ctx)
     except BaseException as exc:
         main_error = exc
         raise
